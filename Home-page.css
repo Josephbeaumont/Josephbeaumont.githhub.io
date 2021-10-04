@@ -10,11 +10,11 @@ body {
 }
 /* navigation menu*/
 nav {
-  background: rgb(239,80,41);
+  background-color:darkslateblue;
   margin: 0 auto;
   margin-bottom:20px;
-  display: flex;
-  padding: 10px;        
+  display:flex;
+  padding: 10px;    
 }
 nav h1 {
   display: flex;
@@ -50,3 +50,7 @@ h2, h3 {
   margin: 0px;
 
 } 
+div a {
+color: white; 
+text-decoration: none; 
+}
