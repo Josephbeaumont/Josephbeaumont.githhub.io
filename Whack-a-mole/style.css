@@ -98,7 +98,8 @@ background-size: cover;
     background-size: 80%;
 }
 .hole.up .mole {
-
+    top: 0;
+    
 }
 
 
