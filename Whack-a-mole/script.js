@@ -49,6 +49,19 @@ function startGame(){
         if (countdown < 0) {
             countdown = 0;
             clearInterval(startCountdown);
+            countdownBoard.textContent = 'Times UP!! Thank you for saving our planet!';
         }
     }, 1000);
 }
+startButton.addEventListener('click', startGame);
+
+function whack(e){
+    score++;
+    this.style.backgroundImage = 'url("yoda.png")';
+    this.style.pointerEvents = 'none';
+    setTimeout(() => {
+        this.backgroundImage = 'url("yoda.png")'
+    }, 800);
+    scoreBoard.textContent = score;
+}
+moles.forEach(mole => mole.addEventListener('click', whack));
