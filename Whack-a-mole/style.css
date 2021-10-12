@@ -41,7 +41,7 @@ body {
     text-align: center;
     color: #010124;
 }
-button {
+Button {
     position: absolute;
     bottom: 10px;
     left: 50%;
