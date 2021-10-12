@@ -58,9 +58,10 @@ startButton[0].addEventListener('click', startGame);
 function whack(e){
     score++;
     this.style.backgroundImage = 'url("yoda.png")';
-    this.styles.pointerEvents = 'none';
+    this.style.pointerEvents = 'none';
     setTimeout(() => {
         this.backgroundImage = 'url("yoda.png")'
+        this.pointerEvents = 'all';
     }, 800);
     scoreBoard.textContent = score;
 }
