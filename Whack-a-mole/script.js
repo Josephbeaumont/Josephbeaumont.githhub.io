@@ -26,7 +26,12 @@ function popOut(){
     hole.classList.add('up');
     setTimeout(function(){
         hole.classList.remove('up');
-        if (!timeUp) popOut();
+        if (!timeUp){
+            popOut();
+        } else{
+            scoreBoard.textContent = 'Times UP!! Thank you for saving our planet!';
+       
+        }
     },time);
 }
 
@@ -47,6 +52,7 @@ function startGame(){
         countdown -= 1;
         countdownBoard.textContent = countdown;
         if (countdown < 0) {
+            timeUp = true
             countdown = 0;
             clearInterval(startCountdown);
             countdownBoard.textContent = 'Times UP!! Thank you for saving our planet!';
