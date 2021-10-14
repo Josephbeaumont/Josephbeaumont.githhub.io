@@ -5,6 +5,16 @@ canvas.eight = window.innerHeight;
 let particlesArray = [];
 const numberOfParticles = 40;
 
+// measure title element
+let titleElement = document.getElementById('title1');
+let titleMeasurements = titleElement.getBoundingClientRect();
+let title = {
+    x: titleMeasurements.left,
+    y: titleMeasurements.top,
+    width: titleMeasurements.width,
+    height: 10
+}
+
 class Particle {
     constructor(x, y){
         this.x = x;
@@ -26,7 +36,7 @@ class Particle {
         if (
             this.x < title.x + title.width &&
             this.x + this.size > title.x &&
-            this.y < this.y + title.height &&
+            this.y < title.y + title.height &&
             this.y + this.size > title.y
         ) {
             this.y -= 3;
