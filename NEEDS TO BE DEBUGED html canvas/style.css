@@ -18,7 +18,7 @@
     font-size: 120px;
     line-height: 110px;
     white-space: nowrap;
-    border-top: 5px solid black;
+    border-top: 5px solid black;   
 }
 #title::before {
     content: 'is awesome';

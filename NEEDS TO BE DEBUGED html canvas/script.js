@@ -3,41 +3,59 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.eight = window.innerHeight;
 let particlesArray = [];
+const numberOfParticles = 40;
 
 class Particle {
     constructor(x, y){
         this.x = x;
         this.y = y;
-        this.size = 4;
-        this.weight = 1;
-        this.directionX = -2;
+        this.size = Math.random(1, 100) * 1 + 1, 1 / 1;
+        this.weight = Math.random(1, 100);
+        this.directionX = Math.random(0, 40);
     }
     update(){
         if (this.y > canvas.height) {
             this.y = 0 - this.size;
-            this.weight = 0;
-            this.x = Math.random() * canvas.width;
+            this.weight = 1;
+            this.x = Math.random() * canvas.width * 1.6;
         }
         this.weight += 0.01;
         this.y += this.weight;
         this.x += this.directionX;
+
+        if (
+            this.x < title.x + title.width &&
+            this.x + this.size > title.x &&
+            this.y < this.y + title.height &&
+            this.y + this.size > title.y
+        ) {
+            this.y -= 3;
+        }
     }
     draw(){
-        ctx.fillStyle = 'red';
+        ctx.fillStyle = 'orange';
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 1);
         ctx.closePath();
         ctx.fill()
     }
 }
-    const particle1 = new Particle(400, 100);
+    function init(){
+        for (let i = 0; i < numberOfParticles; i++){
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            particlesArray.push(new Particle(x, y));
+        }
+    }
+init();
 
     function animate(){
         ctx.fillStyle = 'rgba(255, 255, 255, 0.01)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-        particle1.update();
-        particle1.draw();
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < particlesArray.length; i++){
+            particlesArray[i].update();
+            particlesArray[i].draw();
+        }
         requestAnimationFrame(animate);
     }
     animate();
