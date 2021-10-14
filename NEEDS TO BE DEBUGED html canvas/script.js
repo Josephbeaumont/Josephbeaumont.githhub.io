@@ -8,8 +8,8 @@ class Particle {
     constructor(x, y){
         this.x = x;
         this.y = y;
-        this.size = 9;
-        this.weight = 2;
+        this.size = 4;
+        this.weight = 1;
         this.directionX = -2;
     }
     update(){
