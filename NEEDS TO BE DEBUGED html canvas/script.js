@@ -1,7 +1,7 @@
 const canvas = document.getElementById('canvas1');
 const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
-canvas.eight = window.innerHeight;
+canvas.height = window.innerHeight;
 let particlesArray = [];
 const numberOfParticles = 100;
 var collisionDebugText = ""

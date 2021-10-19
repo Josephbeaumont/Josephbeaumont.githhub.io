@@ -1,10 +1,19 @@
 <!DOCTYPE HTML>
-<html>
-  <head>
+<html lang="en">
+  <head><style>
+     body {
+        background-image: url('https://edmidentity.com/wp-content/uploads/2019/04/Eric-Prydz-VOID-Creamfields-2019-696x392.jpg');
+        background-size:cover;
+        background-repeat: no-repeat;
+      }
+  </style>
     <title>Void Space</title>
     <link rel="stylesheet" href="Home-page.css">
+    <meta charset="UTF-8">
+    <meta name="veiwport" content="width=device, initial-scale=1.0">
   </head>
   <body>
+    <canvas id="canvas1"></canvas>
     <div class=”all-contents”>
          <nav>
            <h1>Void Space</h1>
@@ -37,16 +46,35 @@
              </div>
            </div> 
          </main>
-          </div>
-    <style>
-      body {
-        background-image: url('https://edmidentity.com/wp-content/uploads/2019/04/Eric-Prydz-VOID-Creamfields-2019-696x392.jpg');
-        background-size:cover;
-        background-repeat: no-repeat
-      }
-    </style>
+        </div>
   </body>      
     </html>
+    <script>
+      const canvas = document.getElementById('canvas1')
+      const ctx = canvas.getContext('2d')
+      canvas.width = window.innerWidth
+      canvas.height = window.innerHeight
+      let particlesArray = []
+      const numberOfParticles = 100;
+
+  class Particle {
+    constructor(x,y) {
+      this.x=x
+      this.y=y
+      this.size = Math.random(1, 100) * 1+1, 1/1;
+      this.weight = Math.random(1, 100);
+      this.directionX = Math.random(0, 40);
+    }
+    update() {
+      if (this.y > canvas.height) {
+        this.y = 0 - this.size;
+        this.weight = 1;
+        this.x = Math.random() * canvas.width * 1.6;
+      }
+    }
+  } 
+    </script>
+
 
 
 
