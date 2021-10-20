@@ -22,10 +22,11 @@
 <script>
     var box = document.getElementById('box')
     setInterval(update, 50)
-    var x = 100
-    var y = 100
+    var x = 0
+    var y = 0
     var speedX = 5
-    var speedY = 5
+    var speedY = 10
+
     function update() {
         box.style.left = x + "px";
         box.style.top = y + "px";
@@ -36,13 +37,13 @@
         if (x >= window.innerWidth) {
             speedX = -speedX
         }
-        if (x <= 0){
+        if (x < 0){
             speedX = -speedX
         }
-        if (y >= window.innerWidth) {
+        if (y >= window.innerHeight) {
             speedY = -speedY
         }
-        if (y <= 0) {
+        if (y < 0) {
             speedY = -speedY
         }
     }
