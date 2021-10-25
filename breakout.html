@@ -92,7 +92,13 @@ function collisionDetection() {
                         document.location.reload();
                         clearInterval(interval); 
                     }
-                }}}}}
+                }
+            }
+        }
+    }
+    
+}
+                
 
 function drawScore() {
     ctx.font = "16px Comic Sans";
@@ -109,7 +115,7 @@ function drawBall() {
 }
 function DrawBall2() {
     ctx.beginPath();
-    ctx.arc(x1, y1, ballRadius, 0, Math.PI * 3);
+    ctx.arc(x1, y1, ballRadius, 0, Math.PI * 2);
     ctx.fillStyle = "red";
     ctx.fill();
     ctx.closePath();
