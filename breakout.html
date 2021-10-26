@@ -50,6 +50,8 @@ var brickPadding = 10;
 var brickOffsetTop = 30;
 var brickOffsetLeft = 30;
 
+
+
 var bricks = [];
 for (var c = 0; c < brickColumnCount; c++) {
     bricks[c] = [];
@@ -109,7 +111,9 @@ function collisionDetection() {
     }
 
 }
-
+/*function NewBall() {
+    if ()
+}*/
    
                 
 
@@ -133,6 +137,7 @@ function DrawBall2() {
     ctx.fill();
     ctx.closePath();
 }
+
 
 function drawPaddle() {
     ctx.beginPath();
@@ -180,7 +185,7 @@ function draw() {
         if (x1 >paddleX && x1 < paddleX + paddleWidth) {
             if (y1 = y1 - paddleHeight) {
                 dy1 = -dy1;
-                dy1 = dy1 -0.5;
+                dy1 = dy1 -0.1;
             }
         }
         else {
