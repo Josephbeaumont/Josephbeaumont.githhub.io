@@ -38,16 +38,16 @@ var y = canvas.height - 30;
 var dx = 2;
 var dy = -2;
 var paddleHeight = 10;
-var paddleWidth = 75;
+var paddleWidth = 100;
 var paddleX = (canvas.width - paddleWidth) / 2;
 var rightPressed = false;
 var leftPressed = false;
-var brickRowCount = 7;
-var brickColumnCount = 11;
+var brickRowCount = Math.random() * 19;
+var brickColumnCount = Math.random() * 14;
 var brickWidth = 75;
 var brickHeight = 20;
 var brickPadding = 10;
-var brickOffsetTop = 30;
+var brickOffsetTop = 25;
 var brickOffsetLeft = 30;
 
 
@@ -184,8 +184,8 @@ function draw() {
     else if (y1 +dy1 > canvas.height - ballRadius) {
         if (x1 >paddleX && x1 < paddleX + paddleWidth) {
             if (y1 = y1 - paddleHeight) {
-                dy1 = -dy1;
-                dy1 = dy1 -0.1;
+                dy1 = Math.random() * -1;
+                dy1 = Math.random() * -6;
             }
         }
         else {
@@ -205,8 +205,8 @@ function draw() {
     else if (y + dy > canvas.height - ballRadius) {
         if (x > paddleX && x < paddleX + paddleWidth) {
             if (y = y - paddleHeight) {
-                dy = -dy; //paddle collsion
-                dy = dy -0.5;
+                dy = Math.random() * -5; //paddle collsion
+                dy = Math.random() * -3;
             }
         }
         else {
