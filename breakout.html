@@ -56,6 +56,12 @@ for (var c = 0; c < brickColumnCount; c++) {
     for (var r = 0; r < brickRowCount; r++) {
         bricks[c][r] = { x: 0, y: 0, status: 1 };
     }
+    for (var c = 0; c < brickColumnCount; c++) {
+        bricks[c] = [];
+        for (var r = 0; r < brickRowCount; r++) {
+            bricks[c][r] = {x1: 0, y1: 0, status: 1};
+        }
+    }
 }
 
 document.addEventListener("keydown", keyDownHandler, false);
@@ -86,18 +92,25 @@ function collisionDetection() {
                 if (x > b.x && x < b.x + brickWidth && y > b.y && y < b.y + brickHeight) {
                     dy = -dy;
                     b.status = 0;
-                    score++;
-                    if(score == brickRowCount*brickColumnCount) {
-                        alert("YOU SUCK");
-                        document.location.reload();
-                        clearInterval(interval); 
-                    }
                 }
             }
         }
     }
-    
+    for (var c = 0; c < brickColumnCount; c++) {
+        for (var r = 0; r < brickRowCount; r++) {
+            var b = bricks[c][r];
+            if (b.status == 1) {
+                if (x1 > b.x && x1 < b.x + brickWidth && y1 > b.y && y1 < b.y + brickHeight) {
+                    dy1 = -dy1;
+                    b.status = 0;
+                }
+            }
+        }
+    }
+
 }
+
+   
                 
 
 function drawScore() {
