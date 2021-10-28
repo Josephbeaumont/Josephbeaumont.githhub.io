@@ -6,10 +6,15 @@
                 margin:auto;
                 left: 50%;
                 right: 50%;
-                width: 50px;
-                height: 50px;
+                width: 80px;
+                height: 80px;
                 position: absolute;
                 transform: translate(50%, 50%);
+            }
+            body {
+                background-image: url("download.jpg");
+                background-size: cover;
+                background-repeat: no-repeat;
             }
 
         </style>
@@ -17,18 +22,25 @@
     </head>
     <body>
         <image id="mushroom" src="mushroom.png"></image>
+        <div id="Score">Score=</div>
 
     </body>
 </html>
 <script>
+    
     var image= document.getElementById('mushroom') 
-    var score= 0;
+    var Score= 0;
 
     image.addEventListener('click', imageClick);
 
     function imageClick(){
+        document.getElementById('Score').innerText="Score=" + Score;     
 
         //alert('works');
     }
+    function update() {
+        Score = Score +1;
+    }
+    setInterval(update, 500)
 
 </script>
