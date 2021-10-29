@@ -11,7 +11,7 @@ let analyser;
 container.addEventListener('click', function () {
     const audio1 = document.getElementById('audio1');
     const audioContext = new AudioContext;
-    audio1.src = "Audio visualiser/music folder/" + (Math.floor(Math.random() * 95))+".mp3" 
+    audio1.src = "Audio visualiser/music/" + (Math.floor(Math.random() * 95))+".mp3" 
     audio1.play(); // 14, 25
     audioSource = audioContext.createMediaElementSource(audio1);
     analyser = audioContext.createAnalyser();
