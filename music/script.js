@@ -18,11 +18,11 @@ container.addEventListener('click', function () {
     analyser = audioContext.createAnalyser();
     audioSource.connect(analyser);
     analyser.connect(audioContext.destination);
-    analyser.fftSize = 4096; // number of bars 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768;
+    analyser.fftSize = 512; // number of bars 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768;
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
-    const barWidth = canvas.width / bufferLength;
+    const barWidth = Math.random() * 4;
     let barHeight;
     let x = 0;
 
@@ -41,8 +41,8 @@ function drawVisualiser(bufferLength, x, barWidth, barHeight, dataArray){
         ctx.save();
         barHeight = dataArray[i] * 2;
         ctx.translate(canvas.width/2, canvas.height/2);
-        ctx.rotate(i * 20 / bufferLength );
-        const hue = i * 4;
+        ctx.rotate(i * 4 / bufferLength );
+        const hue = i;
         ctx.fillStyle = 'hsl(' + hue + ',100%, 50%)';
         ctx.fillRect(0, 0, barWidth, barHeight);
         x += barWidth;
