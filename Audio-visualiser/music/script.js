@@ -11,7 +11,7 @@ let analyser;
 container.addEventListener('click', function () {
     const audio1 = document.getElementById('audio1');
     const audioContext = new AudioContext;
-    audio1.src = "Audio visualiser/music/" + (Math.floor(Math.random() * 95))+".mp3" 
+    audio1.src = (Math.floor(Math.random() * 95))+".mp3" 
     audio1.play(); // 14, 25
     audioSource = audioContext.createMediaElementSource(audio1);
     analyser = audioContext.createAnalyser();
@@ -21,7 +21,7 @@ container.addEventListener('click', function () {
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 // number of bars 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768;
-    const barWidth = 0.20;
+    const barWidth = 0.200;
     let barHeight;
     let x = 0;
 
@@ -42,7 +42,7 @@ function drawVisualiser(bufferLength, x, barWidth, barHeight, dataArray){
         ctx.translate(canvas.width/2, canvas.height/2);
         ctx.rotate(i * 20 / bufferLength);
         const hue = i / barHeight;
-        ctx.fillStyle = 'hsl(' + hue + ',100%, 50%)';
+        ctx.fillStyle = 'hsl(' + hue + ',1000%, 50%)';
         ctx.fillRect(0, 0, barWidth, barHeight/1);
         x += barWidth;
         ctx.restore();
