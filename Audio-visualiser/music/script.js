@@ -4,7 +4,7 @@ const canvas = document.getElementById('canvas1');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 let particleArray = [];
-const numberOfParticles = Math.random() * 500;
+const numberOfParticles = 100;
 const ctx = canvas.getContext('2d');
 let audioSource;
 let analyser;
@@ -117,10 +117,11 @@ function init(){
 function animate2(){
 
     ctx.fillStyle = 'rgba(0,0,0,0.01)'
-    ctx.fillRect
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
         for (let i = 0; i < particleArray.length; i++){
             particleArray[i].update();
             particleArray[i].draw();
+            requestAnimationFrame(animate2)// 16:54
         }
 }
 
