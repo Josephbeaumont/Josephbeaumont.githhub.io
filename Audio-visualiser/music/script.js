@@ -10,6 +10,7 @@ let audioSource;
 let analyser;
 
 
+
 container.addEventListener('click', function () {
     const audio1 = document.getElementById('audio1');
     const audioContext = new AudioContext;
@@ -51,7 +52,7 @@ function drawVisualiser(bufferLength, x, barWidth, barHeight, dataArray) {
     }
 }
 
-// Mouse particle Effects
+/*// Mouse particle Effects
 
 // canvas setup
 
@@ -104,7 +105,7 @@ class Particle {
 
 function init(){
     particleArray = [];
-    for (let i = 0; i < numberOfParticles; i++){
+    for (let t = 0; t < numberOfParticles; t++){
         let x = Math.random() * canvas.width;
         let y = Math.random() * canvas.height;
         let size = (Math.random() * 5) + 2;
@@ -114,16 +115,16 @@ function init(){
     }
 }
 
-function //animate2(){
+function animate2(){
 
     ctx.fillStyle = 'rgba(0,0,0,0.01)'
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-        for (let i = 0; i < particleArray.length; i++){
-            particleArray[i].update();
-            particleArray[i].draw();
+        for (let t = 0; t < particleArray.length; t++){
+            particleArray[t].update();
+            particleArray[t].draw();
             requestAnimationFrame(animate2)// 16:54
         }
 }
 
 init();
-//animate2
+animate2*/
