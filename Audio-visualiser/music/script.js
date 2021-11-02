@@ -114,7 +114,7 @@ function init(){
     }
 }
 
-function animate2(){
+function //animate2(){
 
     ctx.fillStyle = 'rgba(0,0,0,0.01)'
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -126,4 +126,4 @@ function animate2(){
 }
 
 init();
-animate2();
+//animate2
