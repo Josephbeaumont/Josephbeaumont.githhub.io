@@ -1,63 +1,4 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-    <meta charset="utf-8" />
-    <title>Gamedev Canvas Workspace</title>
-    <style>
-        * {
-            padding: 0;
-            margin: 0;
-        }
-
-        Canvas {
-            background: #eee;
-            display: block;
-            margin: 0 auto;
-        }
-
-        canvas {
-            background-color: green;
-            animation-name: example;
-            animation-duration: 4s;
-            animation-iteration-count: infinite;
-        }
-
-        @keyframes example {
-            from {
-                background-color: darkgray;
-            }
-
-            to {
-                background-color: rgb(44, 210, 55);
-                background-color: rgb(50, 134, 50);
-                background-color: rgb(237, 179, 72);
-                background-color: rgb(239, 85, 239);
-                background-color: rgb(74, 100, 20);
-                background-color: rgb(30, 30, 55);
-                background-color: rgb(234, 164, 176);
-                background-color: rgb(171, 45, 45);
-                background-color: rgb(51, 98, 159);
-                background-color: rgb(247, 1, 255);
-                background-color: rgb(56, 181, 18);
-                background-color: rgb(0, 245, 86);
-                background-color: rgb(166, 45, 190);
-                background-color: rgb(201, 120, 70);
-                background-color: rgb(93, 24, 158);
-                background-color: rgb(152, 39, 158);
-                background-color: rgb(29, 44, 142);
-            }
-        }
-    </style>
-</head>
-
-<body>
-    <canvas id="myCanvas" width="1000" height="750"></canvas>
-
-
-    <script>
-
-        var canvas = document.getElementById("myCanvas");
+var canvas = document.getElementById("myCanvas");
         var ctx = canvas.getContext("2d");
         var score = 0;
         var ballRadius = 10;
@@ -316,8 +257,3 @@
         }
 
         var interval = setInterval(draw, 10)
-    </script>
-
-</body>
-
-</html>
