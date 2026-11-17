@@ -205,6 +205,14 @@ public class MainActivity extends Activity {
     private long freedThisSession;
     private int sortMode = SORT_SIZE;
 
+    private static final int TAB_VIDEOS = 0, TAB_MY_GROUPS = 1;
+    private int tab = TAB_VIDEOS;
+    private LinearLayout tabBar;
+    private TextView[] tabViews;
+    private View[] tabLines;
+    private View storageCard, hintView, myGroupsBox;
+    private TextView myGroupsText;
+
     // ---------------------------------------------------------------- lifecycle
 
     @Override
@@ -215,6 +223,7 @@ public class MainActivity extends Activity {
         sortMode = prefs.getInt("sort", SORT_SIZE);
         groupMode = prefs.getInt("group", GROUP_VLC);
         groupLen = prefs.getInt("groupLen", 6);
+        tab = prefs.getInt("tab", TAB_VIDEOS);
 
         if (savedInstanceState != null) {
             freedThisSession = savedInstanceState.getLong("freed");
@@ -282,8 +291,12 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- UI
 
     private void buildUi() {
+        LinearLayout outerRoot = new LinearLayout(this);
+        outerRoot.setOrientation(LinearLayout.VERTICAL);
+        outerRoot.setBackgroundColor(C_BG);
+        outerRoot.addView(buildTabs(), new LinearLayout.LayoutParams(-1, -2));
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(C_BG);
+        outerRoot.addView(root, new LinearLayout.LayoutParams(-1, 0, 1));
 
         list = new ListView(this);
         list.setDivider(null);
@@ -330,7 +343,58 @@ public class MainActivity extends Activity {
         emptyView.setVisibility(View.GONE);
         root.addView(emptyView, new FrameLayout.LayoutParams(-1, -1));
 
-        setContentView(root);
+        setContentView(outerRoot);
+    }
+
+    /** "Videos" and "My groups" tabs, styled like VLC's. */
+    private View buildTabs() {
+        tabBar = new LinearLayout(this);
+        tabBar.setOrientation(LinearLayout.HORIZONTAL);
+        tabBar.setPadding(dp(8), 0, dp(8), 0);
+        String[] labels = {"VIDEOS", "MY GROUPS"};
+        tabViews = new TextView[labels.length];
+        tabLines = new View[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            final int which = i;
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setOnClickListener(v -> selectTab(which));
+            TextView t = text(15, C_TEXT_2, true);
+            t.setText(labels[i]);
+            t.setLetterSpacing(0.06f);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(dp(12), dp(12), dp(12), dp(10));
+            box.addView(t, new LinearLayout.LayoutParams(-2, -2));
+            View line = new View(this);
+            line.setBackground(rounded(C_ACCENT, 2));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(3));
+            lp.leftMargin = dp(10);
+            lp.rightMargin = dp(10);
+            box.addView(line, lp);
+            tabViews[i] = t;
+            tabLines[i] = line;
+            tabBar.addView(box, new LinearLayout.LayoutParams(-2, -2));
+        }
+        styleTabs();
+        return tabBar;
+    }
+
+    private void styleTabs() {
+        for (int i = 0; i < tabViews.length; i++) {
+            boolean on = i == tab;
+            tabViews[i].setTextColor(on ? C_ACCENT : C_TEXT_2);
+            tabLines[i].setVisibility(on ? View.VISIBLE : View.INVISIBLE);
+        }
+    }
+
+    private void selectTab(int which) {
+        if (tab == which && openGroup == null) return;
+        tab = which;
+        openGroup = null;
+        getPreferences(MODE_PRIVATE).edit().putInt("tab", tab).apply();
+        styleTabs();
+        applyFilter();
+        list.setSelection(0);
     }
 
     private View buildHeader() {
@@ -369,11 +433,32 @@ public class MainActivity extends Activity {
         card.addView(freedText);
 
         h.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        storageCard = card;
 
         TextView hint = text(13, C_TEXT_2, false);
         hint.setText("Tap a video to watch it in VLC. When you're done, you'll be asked whether to keep it.");
         hint.setPadding(dp(4), dp(12), dp(4), dp(2));
         h.addView(hint);
+        hintView = hint;
+
+        // Shown on the My groups tab instead of the storage card
+        LinearLayout mg = new LinearLayout(this);
+        mg.setOrientation(LinearLayout.VERTICAL);
+        Button newGroup = new Button(this);
+        newGroup.setText("+  New group from Google Photos");
+        newGroup.setAllCaps(false);
+        newGroup.setTextColor(0xFF000000);
+        newGroup.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        newGroup.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33000000), pill(C_ACCENT), null));
+        newGroup.setOnClickListener(v -> showAlbumHelp());
+        mg.addView(newGroup, new LinearLayout.LayoutParams(-1, dp(50)));
+        myGroupsText = text(13, C_TEXT_2, false);
+        myGroupsText.setPadding(dp(4), dp(12), dp(4), dp(2));
+        myGroupsText.setLineSpacing(0, 1.15f);
+        mg.addView(myGroupsText);
+        mg.setVisibility(View.GONE);
+        h.addView(mg, new LinearLayout.LayoutParams(-1, -2));
+        myGroupsBox = mg;
 
         // Wrapped so the whole header can be hidden while a group is open.
         headerContent = h;
@@ -804,8 +889,8 @@ public class MainActivity extends Activity {
 
         Map<String, Group> groups = new LinkedHashMap<>();
         Set<Long> inAlbum = new HashSet<>();
-        if (groupMode != GROUP_NONE) {
-            // Your own albums come first; their videos leave the automatic groups, like in VLC.
+        {
+            // Your own groups come first; their videos leave the automatic groups, like in VLC.
             Map<Long, Video> byId = new java.util.HashMap<>();
             for (Video v : allVideos) byId.put(v.id, v);
             for (int i = 0; i < albums.size(); i++) {
@@ -821,6 +906,8 @@ public class MainActivity extends Activity {
                 }
                 if (!g.videos.isEmpty()) groups.put(g.key, g);
             }
+        }
+        if (groupMode != GROUP_NONE) {
             for (Video v : allVideos) {
                 if (inAlbum.contains(v.id)) continue;
                 String key = groupMode == GROUP_FOLDER ? "f:" + v.folderPath + "/" + folderOf(v) : "n:" + vlcGroupKey(v);
@@ -838,6 +925,8 @@ public class MainActivity extends Activity {
         if (open != null) {
             videos.addAll(open.videos);
             shown.addAll(videos);
+        } else if (tab == TAB_MY_GROUPS) {
+            for (Group g : groups.values()) if (g.albumIndex >= 0) shown.add(g);
         } else if (groupMode == GROUP_NONE) {
             shown.addAll(allVideos);
         } else {
@@ -869,6 +958,17 @@ public class MainActivity extends Activity {
             }
         }
         headerContent.setVisibility(open != null ? View.GONE : View.VISIBLE);
+        tabBar.setVisibility(open != null ? View.GONE : View.VISIBLE);
+        boolean mine = tab == TAB_MY_GROUPS;
+        storageCard.setVisibility(mine ? View.GONE : View.VISIBLE);
+        hintView.setVisibility(mine ? View.GONE : View.VISIBLE);
+        myGroupsBox.setVisibility(mine ? View.VISIBLE : View.GONE);
+        if (mine) {
+            int n = shown.size();
+            myGroupsText.setText(n == 0
+                    ? "Groups you make show up here. Tap the button above to make one from a Google Photos album."
+                    : n + (n == 1 ? " group" : " groups") + " · tap one to open it, long-press to rename or remove it.");
+        }
     }
 
     /** VLC names a group after the beginning that all its videos' names share. */

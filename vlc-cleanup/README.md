@@ -30,6 +30,8 @@ from Google Photos to VLC Cleanup also works where the share menu offers it.) To
 later, pick them the same way and choose **Add to existing group**. VLC Cleanup matches them to the videos on your phone. Long-press the group to
 rename or remove it (removing a group never deletes videos). This is also in the ⋮ menu.
 
+The **My groups** tab shows only the groups you made, with a button to make a new one.
+
 Use the sort button (top right) to sort by size, newest, oldest or name.
 
 ## Install
