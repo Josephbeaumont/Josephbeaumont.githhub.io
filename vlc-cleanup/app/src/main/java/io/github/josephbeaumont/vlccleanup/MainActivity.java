@@ -7,27 +7,54 @@ import android.app.PendingIntent;
 import android.app.RecoverableSecurityException;
 import android.content.ActivityNotFoundException;
 import android.content.ContentUris;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.content.res.TypedArray;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Outline;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.StatFs;
 import android.provider.MediaStore;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.TextUtils;
+import android.text.format.DateFormat;
 import android.text.format.Formatter;
+import android.text.style.ForegroundColorSpan;
+import android.util.LruCache;
+import android.util.Size;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
+import android.widget.AbsListView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -36,8 +63,15 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Lists the videos on the phone. Tapping one opens it in VLC; when VLC closes
@@ -61,6 +95,17 @@ public class MainActivity extends Activity {
     private static final int SORT_SIZE = 0, SORT_NEWEST = 1, SORT_OLDEST = 2, SORT_NAME = 3;
     private static final String[] SORT_LABELS = {"Biggest first", "Newest first", "Oldest first", "Name"};
 
+    // Colours
+    private static final int C_BG = 0xFF121316;
+    private static final int C_CARD = 0xFF1E2025;
+    private static final int C_CARD_2 = 0xFF2A2D33;
+    private static final int C_TEXT = 0xFFF2F2F2;
+    private static final int C_TEXT_2 = 0xFFA0A4AB;
+    private static final int C_ACCENT = 0xFFFF8800;
+    private static final int C_OTHER = 0xFF6B7079;
+    private static final int C_DANGER = 0xFFFF5A5F;
+    private static final int C_GOOD = 0xFF4CD07D;
+
     /** One video from the phone's media library. */
     static final class Video {
         final long id;
@@ -68,7 +113,7 @@ public class MainActivity extends Activity {
         final String name;
         final long size;
         final long durationMs;
-        final long dateAdded;
+        final long dateAdded; // seconds
         final String folder;
 
         Video(long id, Uri uri, String name, long size, long durationMs, long dateAdded, String folder) {
@@ -82,12 +127,28 @@ public class MainActivity extends Activity {
         }
     }
 
-    private final List<Video> videos = new ArrayList<>();
+    private final List<Video> allVideos = new ArrayList<>();
+    private final List<Video> shown = new ArrayList<>();
+    private String folderFilter; // null = all folders
+
     private VideoAdapter adapter;
-    private TextView header;
+    private ListView list;
     private LinearLayout emptyView;
     private TextView emptyText;
     private Button emptyButton;
+
+    // Header views
+    private TextView totalSize, totalCount, legend, freedText;
+    private StorageBar storageBar;
+    private LinearLayout chipRow;
+
+    // Thumbnails
+    private final LruCache<Long, Bitmap> thumbs = new LruCache<Long, Bitmap>((int) (Runtime.getRuntime().maxMemory() / 8)) {
+        @Override protected int sizeOf(Long key, Bitmap b) { return b.getByteCount(); }
+    };
+    private final Set<Long> noThumb = new HashSet<>();
+    private final ExecutorService pool = Executors.newFixedThreadPool(3);
+    private final Handler main = new Handler(Looper.getMainLooper());
 
     /** The video handed to VLC, or waiting to be deleted. Survives the app being killed while VLC plays. */
     private Video current;
@@ -105,6 +166,7 @@ public class MainActivity extends Activity {
 
         if (savedInstanceState != null) {
             freedThisSession = savedInstanceState.getLong("freed");
+            folderFilter = savedInstanceState.getString("folder");
             if (savedInstanceState.containsKey("cur_id")) {
                 current = new Video(
                         savedInstanceState.getLong("cur_id"),
@@ -116,6 +178,10 @@ public class MainActivity extends Activity {
             }
         }
 
+        if (getActionBar() != null) {
+            getActionBar().setElevation(0);
+            getActionBar().setBackgroundDrawable(new ColorDrawable(C_BG));
+        }
         buildUi();
 
         if (!hasReadPermission()) {
@@ -132,9 +198,16 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        pool.shutdownNow();
+    }
+
+    @Override
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         out.putLong("freed", freedThisSession);
+        out.putString("folder", folderFilter);
         if (current != null) {
             out.putLong("cur_id", current.id);
             out.putString("cur_uri", current.uri.toString());
@@ -147,42 +220,105 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- UI
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(C_BG);
 
-        header = new TextView(this);
-        header.setPadding(dp(16), dp(12), dp(16), dp(12));
-        header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        root.addView(header, new LinearLayout.LayoutParams(-1, -2));
-
-        ListView list = new ListView(this);
+        list = new ListView(this);
+        list.setDivider(null);
+        list.setSelector(new ColorDrawable(0));
+        list.setClipToPadding(false);
+        list.setPadding(0, 0, 0, dp(16));
+        list.addHeaderView(buildHeader(), null, false);
         adapter = new VideoAdapter();
         list.setAdapter(adapter);
-        list.setOnItemClickListener((p, v, pos, id) -> playInVlc(videos.get(pos)));
+        list.setOnItemClickListener((p, v, pos, id) -> {
+            Object o = p.getItemAtPosition(pos);
+            if (o instanceof Video) playInVlc((Video) o);
+        });
         list.setOnItemLongClickListener((p, v, pos, id) -> {
-            current = videos.get(pos);
+            Object o = p.getItemAtPosition(pos);
+            if (!(o instanceof Video)) return false;
+            current = (Video) o;
             askToDelete(current, null);
             return true;
         });
+        root.addView(list, new FrameLayout.LayoutParams(-1, -1));
 
         emptyView = new LinearLayout(this);
         emptyView.setOrientation(LinearLayout.VERTICAL);
         emptyView.setGravity(Gravity.CENTER);
         emptyView.setPadding(dp(32), dp(32), dp(32), dp(32));
-        emptyText = new TextView(this);
+        emptyView.setBackgroundColor(C_BG);
+        emptyText = text(16, C_TEXT, false);
         emptyText.setGravity(Gravity.CENTER);
-        emptyText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        emptyText.setLineSpacing(0, 1.2f);
         emptyView.addView(emptyText);
         emptyButton = new Button(this);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-2, -2);
-        bp.topMargin = dp(16);
+        emptyButton.setTextColor(0xFF000000);
+        emptyButton.setBackground(pill(C_ACCENT));
+        emptyButton.setPadding(dp(24), 0, dp(24), 0);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-2, dp(48));
+        bp.topMargin = dp(24);
         emptyView.addView(emptyButton, bp);
-
-        root.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(emptyView, new LinearLayout.LayoutParams(-1, 0, 1));
-        list.setEmptyView(emptyView);
+        emptyView.setVisibility(View.GONE);
+        root.addView(emptyView, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
+    }
+
+    private View buildHeader() {
+        LinearLayout h = new LinearLayout(this);
+        h.setOrientation(LinearLayout.VERTICAL);
+        h.setPadding(dp(16), dp(4), dp(16), dp(8));
+
+        // Storage card
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(16), dp(18), dp(16));
+        card.setBackground(rounded(C_CARD, 20));
+
+        LinearLayout big = new LinearLayout(this);
+        big.setOrientation(LinearLayout.HORIZONTAL);
+        big.setBaselineAligned(true);
+        totalSize = text(30, C_TEXT, true);
+        totalCount = text(14, C_TEXT_2, false);
+        totalCount.setPadding(dp(8), 0, 0, 0);
+        big.addView(totalSize);
+        big.addView(totalCount);
+        card.addView(big);
+
+        storageBar = new StorageBar(this);
+        LinearLayout.LayoutParams sb = new LinearLayout.LayoutParams(-1, dp(10));
+        sb.topMargin = dp(14);
+        card.addView(storageBar, sb);
+
+        legend = text(12, C_TEXT_2, false);
+        legend.setPadding(0, dp(10), 0, 0);
+        card.addView(legend);
+
+        freedText = text(13, C_GOOD, true);
+        freedText.setPadding(0, dp(10), 0, 0);
+        freedText.setVisibility(View.GONE);
+        card.addView(freedText);
+
+        h.addView(card, new LinearLayout.LayoutParams(-1, -2));
+
+        // Folder filter chips
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        chipRow = new LinearLayout(this);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        scroll.addView(chipRow);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
+        sp.topMargin = dp(14);
+        h.addView(scroll, sp);
+
+        TextView hint = text(13, C_TEXT_2, false);
+        hint.setText("Tap a video to watch it in VLC. When you're done, you'll be asked whether to keep it.");
+        hint.setPadding(dp(4), dp(12), dp(4), dp(2));
+        h.addView(hint);
+
+        return h;
     }
 
     private void showEmpty(String message, String buttonLabel, View.OnClickListener onClick) {
@@ -194,32 +330,95 @@ public class MainActivity extends Activity {
             emptyButton.setText(buttonLabel);
             emptyButton.setOnClickListener(onClick);
         }
-        header.setText(freeSpaceText());
+        emptyView.setVisibility(View.VISIBLE);
     }
 
     private void updateHeader() {
-        long total = 0;
-        for (Video v : videos) total += v.size;
-        StringBuilder sb = new StringBuilder();
-        sb.append(videos.size()).append(videos.size() == 1 ? " video · " : " videos · ")
-                .append(size(total)).append('\n').append(freeSpaceText());
-        if (freedThisSession > 0) sb.append(" · freed ").append(size(freedThisSession)).append(" so far");
-        sb.append("\nTap to watch in VLC · long-press to delete now");
-        header.setText(sb);
-    }
+        long videoBytes = 0;
+        for (Video v : allVideos) videoBytes += v.size;
 
-    private String freeSpaceText() {
+        totalSize.setText(size(videoBytes));
+        totalCount.setText("of video · " + allVideos.size() + (allVideos.size() == 1 ? " file" : " files"));
+
+        long free = 0, total = 0;
         try {
             StatFs fs = new StatFs(Environment.getExternalStorageDirectory().getPath());
-            return size(fs.getAvailableBytes()) + " free on phone";
-        } catch (Exception e) {
-            return "";
+            free = fs.getAvailableBytes();
+            total = fs.getTotalBytes();
+        } catch (Exception ignored) {
         }
+        long other = Math.max(0, total - free - videoBytes);
+        storageBar.set(videoBytes, other, free);
+
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        dot(sb, C_ACCENT); sb.append(" Videos   ");
+        dot(sb, C_OTHER); sb.append(" Other   ");
+        dot(sb, 0xFF4A4E56); sb.append(" Free ").append(size(free));
+        legend.setText(sb);
+
+        if (freedThisSession > 0) {
+            freedText.setText("You've freed " + size(freedThisSession) + " so far");
+            freedText.setVisibility(View.VISIBLE);
+        } else {
+            freedText.setVisibility(View.GONE);
+        }
+    }
+
+    private static void dot(SpannableStringBuilder sb, int color) {
+        int start = sb.length();
+        sb.append("●");
+        sb.setSpan(new ForegroundColorSpan(color),
+                start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    private void updateChips() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (Video v : allVideos) {
+            String f = folderOf(v);
+            Integer c = counts.get(f);
+            counts.put(f, c == null ? 1 : c + 1);
+        }
+        if (folderFilter != null && !counts.containsKey(folderFilter)) folderFilter = null;
+
+        // Biggest folders first
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
+        Collections.sort(entries, (a, b) -> b.getValue() - a.getValue());
+
+        chipRow.removeAllViews();
+        chipRow.addView(chip("All  " + allVideos.size(), folderFilter == null, null));
+        for (Map.Entry<String, Integer> e : entries) {
+            chipRow.addView(chip(e.getKey() + "  " + e.getValue(), e.getKey().equals(folderFilter), e.getKey()));
+        }
+        // Hide chips when everything is in one folder
+        ((View) chipRow.getParent()).setVisibility(counts.size() > 1 ? View.VISIBLE : View.GONE);
+    }
+
+    private View chip(String label, boolean selected, String folder) {
+        TextView t = text(14, selected ? 0xFF000000 : C_TEXT, selected);
+        t.setText(label);
+        t.setPadding(dp(14), dp(8), dp(14), dp(8));
+        t.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), pill(selected ? C_ACCENT : C_CARD), null));
+        t.setOnClickListener(v -> {
+            folderFilter = folder;
+            applyFilter();
+            updateChips();
+            list.setSelection(0);
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.rightMargin = dp(8);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    private static String folderOf(Video v) {
+        return v.folder == null || v.folder.isEmpty() ? "Other" : v.folder;
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(0, 1, 0, "Sort: " + SORT_LABELS[sortMode]).setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+        menu.add(0, 1, 0, "Sort")
+                .setIcon(R.drawable.ic_sort)
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
         menu.add(0, 2, 1, "Refresh");
         return true;
     }
@@ -232,9 +431,8 @@ public class MainActivity extends Activity {
                     .setSingleChoiceItems(SORT_LABELS, sortMode, (d, which) -> {
                         sortMode = which;
                         getPreferences(MODE_PRIVATE).edit().putInt("sort", sortMode).apply();
-                        sortVideos();
-                        adapter.notifyDataSetChanged();
-                        invalidateOptionsMenu();
+                        applyFilter();
+                        list.setSelection(0);
                         d.dismiss();
                     })
                     .show();
@@ -246,41 +444,140 @@ public class MainActivity extends Activity {
         return super.onOptionsItemSelected(item);
     }
 
+    /** Holds the views of one row. */
+    private static final class Row {
+        ImageView thumb;
+        TextView duration, title, meta;
+        ImageButton delete;
+        Video video;
+    }
+
     private final class VideoAdapter extends BaseAdapter {
-        @Override public int getCount() { return videos.size(); }
-        @Override public Object getItem(int i) { return videos.get(i); }
-        @Override public long getItemId(int i) { return videos.get(i).id; }
+        @Override public int getCount() { return shown.size(); }
+        @Override public Object getItem(int i) { return shown.get(i); }
+        @Override public long getItemId(int i) { return shown.get(i).id; }
 
         @Override
         public View getView(int i, View convert, ViewGroup parent) {
-            LinearLayout row;
-            TextView title, detail;
+            Row r;
+            View view;
             if (convert == null) {
-                row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.VERTICAL);
-                row.setPadding(dp(16), dp(12), dp(16), dp(12));
-                title = new TextView(MainActivity.this);
-                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                title.setTypeface(Typeface.DEFAULT_BOLD);
-                title.setMaxLines(2);
-                detail = new TextView(MainActivity.this);
-                detail.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                detail.setAlpha(0.7f);
-                row.addView(title);
-                row.addView(detail);
+                r = new Row();
+                view = buildRow(r);
+                view.setTag(r);
             } else {
-                row = (LinearLayout) convert;
-                title = (TextView) row.getChildAt(0);
-                detail = (TextView) row.getChildAt(1);
+                view = convert;
+                r = (Row) convert.getTag();
             }
-            Video v = videos.get(i);
-            title.setText(v.name);
-            StringBuilder sb = new StringBuilder(size(v.size));
-            if (v.durationMs > 0) sb.append(" · ").append(time(v.durationMs));
-            if (v.folder != null && !v.folder.isEmpty()) sb.append(" · ").append(v.folder);
-            detail.setText(sb);
-            return row;
+            Video v = shown.get(i);
+            r.video = v;
+            r.title.setText(v.name);
+            r.duration.setText(v.durationMs > 0 ? time(v.durationMs) : "");
+            r.duration.setVisibility(v.durationMs > 0 ? View.VISIBLE : View.GONE);
+
+            SpannableStringBuilder meta = new SpannableStringBuilder(size(v.size));
+            meta.setSpan(new ForegroundColorSpan(C_ACCENT), 0, meta.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            meta.append("  ·  ").append(folderOf(v));
+            if (v.dateAdded > 0) {
+                meta.append("\n").append(DateFormat.getMediumDateFormat(MainActivity.this).format(new Date(v.dateAdded * 1000)));
+            }
+            r.meta.setText(meta);
+            loadThumb(v, r.thumb);
+            return view;
         }
+    }
+
+    private View buildRow(Row r) {
+        FrameLayout outer = new FrameLayout(this);
+        outer.setPadding(dp(16), dp(5), dp(16), dp(5));
+        outer.setLayoutParams(new AbsListView.LayoutParams(-1, -2));
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(10), dp(10), dp(4), dp(10));
+        card.setBackground(new RippleDrawable(ColorStateList.valueOf(0x22FFFFFF), rounded(C_CARD, 18), null));
+        card.setDuplicateParentStateEnabled(true); // show the ripple when the list row is pressed
+        outer.addView(card, new FrameLayout.LayoutParams(-1, -2));
+
+        // Thumbnail with a duration badge
+        FrameLayout thumbBox = new FrameLayout(this);
+        r.thumb = new ImageView(this);
+        r.thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        r.thumb.setBackground(rounded(C_CARD_2, 12));
+        clipRounded(r.thumb, 12);
+        thumbBox.addView(r.thumb, new FrameLayout.LayoutParams(-1, -1));
+        r.duration = text(11, 0xFFFFFFFF, true);
+        r.duration.setPadding(dp(6), dp(2), dp(6), dp(2));
+        r.duration.setBackground(rounded(0xB3000000, 6));
+        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        dl.setMargins(0, 0, dp(5), dp(5));
+        thumbBox.addView(r.duration, dl);
+        card.addView(thumbBox, new LinearLayout.LayoutParams(dp(128), dp(72)));
+
+        // Name and details
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        r.title = text(15, C_TEXT, true);
+        r.title.setMaxLines(2);
+        r.title.setEllipsize(TextUtils.TruncateAt.END);
+        r.meta = text(13, C_TEXT_2, false);
+        r.meta.setPadding(0, dp(4), 0, 0);
+        r.meta.setLineSpacing(0, 1.1f);
+        texts.addView(r.title);
+        texts.addView(r.meta);
+        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, -2, 1);
+        tl.leftMargin = dp(12);
+        card.addView(texts, tl);
+
+        // Delete button
+        r.delete = new ImageButton(this);
+        r.delete.setImageResource(R.drawable.ic_delete);
+        r.delete.setBackground(borderlessRipple());
+        r.delete.setFocusable(false);
+        r.delete.setContentDescription("Delete");
+        r.delete.setOnClickListener(v -> {
+            if (r.video == null) return;
+            current = r.video;
+            askToDelete(current, null);
+        });
+        card.addView(r.delete, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        return outer;
+    }
+
+    // ---------------------------------------------------------------- thumbnails
+
+    private void loadThumb(Video v, ImageView iv) {
+        iv.setTag(v.id);
+        Bitmap cached = thumbs.get(v.id);
+        if (cached != null) {
+            iv.setImageBitmap(cached);
+            return;
+        }
+        iv.setImageDrawable(null);
+        if (noThumb.contains(v.id)) return;
+        pool.execute(() -> {
+            Bitmap bm = null;
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    bm = getContentResolver().loadThumbnail(v.uri, new Size(384, 216), null);
+                } else {
+                    bm = MediaStore.Video.Thumbnails.getThumbnail(getContentResolver(), v.id,
+                            MediaStore.Video.Thumbnails.MINI_KIND, null);
+                }
+            } catch (Exception ignored) {
+            }
+            final Bitmap result = bm;
+            main.post(() -> {
+                if (result == null) {
+                    noThumb.add(v.id);
+                    return;
+                }
+                thumbs.put(v.id, result);
+                if (Long.valueOf(v.id).equals(iv.getTag())) iv.setImageBitmap(result);
+            });
+        });
     }
 
     // ---------------------------------------------------------------- permissions
@@ -311,7 +608,9 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != REQ_PERMISSION) return;
-        if (!hasReadPermission()) {
+        if (hasReadPermission()) {
+            loadVideos();
+        } else {
             showEmpty("Without access to your videos this app can't list or delete them.\n\n"
                             + "If the button doesn't bring up a prompt, allow \"Videos\" (or \"Files and media\") "
                             + "for VLC Cleanup in your phone's Settings → Apps.",
@@ -322,7 +621,7 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- loading
 
     private void loadVideos() {
-        videos.clear();
+        allVideos.clear();
         Uri collection = Build.VERSION.SDK_INT >= 29
                 ? MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
                 : MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
@@ -339,7 +638,7 @@ public class MainActivity extends Activity {
                 while (c.moveToNext()) {
                     long id = c.getLong(0);
                     String name = c.getString(1);
-                    videos.add(new Video(
+                    allVideos.add(new Video(
                             id,
                             ContentUris.withAppendedId(collection, id),
                             name != null ? name : "(unnamed video)",
@@ -352,16 +651,22 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             Toast.makeText(this, "Couldn't read videos: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
-        sortVideos();
-        adapter.notifyDataSetChanged();
-        if (videos.isEmpty()) {
+
+        if (allVideos.isEmpty()) {
             showEmpty("No videos found on this phone.", null, null);
-        } else {
-            updateHeader();
+            return;
         }
+        emptyView.setVisibility(View.GONE);
+        updateChips();
+        applyFilter();
+        updateHeader();
     }
 
-    private void sortVideos() {
+    private void applyFilter() {
+        shown.clear();
+        for (Video v : allVideos) {
+            if (folderFilter == null || folderFilter.equals(folderOf(v))) shown.add(v);
+        }
         Comparator<Video> cmp;
         switch (sortMode) {
             case SORT_NEWEST: cmp = (a, b) -> Long.compare(b.dateAdded, a.dateAdded); break;
@@ -369,7 +674,9 @@ public class MainActivity extends Activity {
             case SORT_NAME:   cmp = (a, b) -> a.name.compareToIgnoreCase(b.name); break;
             default:          cmp = (a, b) -> Long.compare(b.size, a.size); break;
         }
-        Collections.sort(videos, cmp);
+        Collections.sort(shown, cmp);
+        adapter.notifyDataSetChanged();
+        if (getActionBar() != null) getActionBar().setSubtitle(SORT_LABELS[sortMode]);
     }
 
     // ---------------------------------------------------------------- VLC
@@ -424,14 +731,14 @@ public class MainActivity extends Activity {
 
             String progress = null;
             if (position > 0 && duration > 0 && position < duration * 0.9) {
-                progress = "You stopped at " + time(position) + " of " + time(duration) + ".";
+                progress = "You stopped at " + time(position) + " of " + time(duration);
             }
             askToDelete(current, progress);
 
         } else if (requestCode == REQ_DELETE) {
             // Android 11+: the system dialog did the delete if the user tapped Allow.
             if (resultCode == RESULT_OK) onDeleted(current);
-            else Toast.makeText(this, "Kept " + (current != null ? current.name : "video"), Toast.LENGTH_SHORT).show();
+            else Toast.makeText(this, "Kept it", Toast.LENGTH_SHORT).show();
 
         } else if (requestCode == REQ_DELETE_RETRY) {
             // Android 10: user granted access, so try deleting again.
@@ -442,19 +749,51 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- deleting
 
     private void askToDelete(Video v, String progress) {
-        StringBuilder msg = new StringBuilder();
-        msg.append(v.name).append("\n\n");
-        if (progress != null) msg.append(progress).append("\n\n");
-        msg.append("Deleting it frees ").append(size(v.size))
-                .append(". The file is removed from your phone for good, not moved to a recycle bin.");
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(8), dp(24), dp(4));
 
-        new AlertDialog.Builder(this)
+        ImageView thumb = new ImageView(this);
+        thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        thumb.setBackground(rounded(C_CARD_2, 14));
+        clipRounded(thumb, 14);
+        loadThumb(v, thumb);
+        box.addView(thumb, new LinearLayout.LayoutParams(-1, dp(170)));
+
+        TextView name = text(16, C_TEXT, true);
+        name.setText(v.name);
+        name.setMaxLines(3);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        name.setPadding(0, dp(14), 0, 0);
+        box.addView(name);
+
+        if (progress != null) {
+            TextView p = text(14, C_TEXT_2, false);
+            p.setText(progress);
+            p.setPadding(0, dp(4), 0, 0);
+            box.addView(p);
+        }
+
+        TextView frees = text(15, C_ACCENT, true);
+        frees.setText("Frees " + size(v.size));
+        frees.setPadding(0, dp(12), 0, 0);
+        box.addView(frees);
+
+        TextView warn = text(13, C_TEXT_2, false);
+        warn.setText("Deleted for good — it won't go to a recycle bin.");
+        warn.setPadding(0, dp(2), 0, 0);
+        box.addView(warn);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Delete this video?")
-                .setMessage(msg)
+                .setView(box)
                 .setPositiveButton("Delete", (d, w) -> deleteVideo(v))
                 .setNegativeButton("Keep", (d, w) -> current = null)
                 .setOnCancelListener(d -> current = null)
-                .show();
+                .create();
+        dialog.show();
+        Button del = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (del != null) del.setTextColor(C_DANGER);
     }
 
     private void deleteVideo(Video v) {
@@ -487,6 +826,7 @@ public class MainActivity extends Activity {
     private void onDeleted(Video v) {
         if (v != null) {
             freedThisSession += v.size;
+            thumbs.remove(v.id);
             Toast.makeText(this, "Deleted · freed " + size(v.size), Toast.LENGTH_SHORT).show();
         }
         current = null;
@@ -494,6 +834,80 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Bar showing videos / other / free space. */
+    static final class StorageBar extends View {
+        private long videos, other, free;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path clip = new Path();
+
+        StorageBar(Context c) { super(c); }
+
+        void set(long videos, long other, long free) {
+            this.videos = videos;
+            this.other = other;
+            this.free = free;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            clip.reset();
+            clip.addRoundRect(0, 0, w, h, h / 2, h / 2, Path.Direction.CW);
+            c.save();
+            c.clipPath(clip);
+            paint.setColor(0xFF2E3138);
+            c.drawRect(0, 0, w, h, paint);
+            long total = videos + other + free;
+            if (total > 0) {
+                float wv = w * videos / total;
+                float wo = w * other / total;
+                paint.setColor(C_ACCENT);
+                c.drawRect(0, 0, wv, h, paint);
+                paint.setColor(C_OTHER);
+                c.drawRect(wv, 0, wv + wo, h, paint);
+            }
+            c.restore();
+        }
+    }
+
+    private TextView text(int sp, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        return t;
+    }
+
+    private GradientDrawable rounded(int color, int radiusDp) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radiusDp));
+        return g;
+    }
+
+    private GradientDrawable pill(int color) {
+        return rounded(color, 100);
+    }
+
+    private void clipRounded(View v, int radiusDp) {
+        final float r = dp(radiusDp);
+        v.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), r);
+            }
+        });
+        v.setClipToOutline(true);
+    }
+
+    private Drawable borderlessRipple() {
+        TypedArray a = obtainStyledAttributes(new int[]{android.R.attr.selectableItemBackgroundBorderless});
+        Drawable d = a.getDrawable(0);
+        a.recycle();
+        return d;
+    }
 
     private String size(long bytes) {
         return Formatter.formatShortFileSize(this, bytes);

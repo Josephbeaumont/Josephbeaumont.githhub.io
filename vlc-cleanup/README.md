@@ -13,9 +13,10 @@ A small Android app for freeing up space: watch a video in VLC, and when you clo
    - On Android 11 and newer, Android shows its own "Allow VLC Cleanup to delete this video?"
      prompt as well. Apps can't skip that prompt. Tap **Allow**.
    - Deleting is permanent. The file doesn't go to a recycle bin.
-4. Long-press a video to delete it without watching it.
+4. Tap the trash icon on a video (or long-press it) to delete it without watching it.
 
-Use the sort button (top right) to sort by size, newest, oldest or name.
+Use the sort button (top right) to sort by size, newest, oldest or name, and the folder
+chips (Camera, Download, …) to show one folder at a time.
 
 ## Install
 

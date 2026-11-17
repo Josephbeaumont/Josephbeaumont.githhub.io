@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#121316</color>
+    <style name="AppTheme" parent="android:Theme.Material">
+        <item name="android:colorPrimary">#121316</item>
+        <item name="android:colorPrimaryDark">#121316</item>
+        <item name="android:colorAccent">#FF8800</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:navigationBarColor">#121316</item>
+    </style>
+</resources>
