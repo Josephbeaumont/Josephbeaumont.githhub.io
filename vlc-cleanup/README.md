@@ -15,8 +15,13 @@ A small Android app for freeing up space: watch a video in VLC, and when you clo
    - Deleting is permanent. The file doesn't go to a recycle bin.
 4. Tap the trash icon on a video (or long-press it) to delete it without watching it.
 
-Use the sort button (top right) to sort by size, newest, oldest or name, and the folder
-chips (Camera, Download, …) to show one folder at a time.
+Videos are grouped the way VLC groups them: videos whose names start with the same
+6 letters go together (e.g. `20161104_192357.mp4` and `20161104_191935.mp4` → "20161104_19").
+Tap a group to open it. In the ⋮ menu you can group by folder instead, turn grouping off,
+or change the number of letters to match VLC's own setting. Groups you made by hand in VLC
+can't be copied, because VLC keeps them private.
+
+Use the sort button (top right) to sort by size, newest, oldest or name.
 
 ## Install
 

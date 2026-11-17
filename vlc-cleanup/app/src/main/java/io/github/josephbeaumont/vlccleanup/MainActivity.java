@@ -114,9 +114,10 @@ public class MainActivity extends Activity {
         final long size;
         final long durationMs;
         final long dateAdded; // seconds
-        final String folder;
+        final String folder;     // folder name, e.g. "Camera"
+        final String folderPath; // full folder location, so two folders with the same name stay apart
 
-        Video(long id, Uri uri, String name, long size, long durationMs, long dateAdded, String folder) {
+        Video(long id, Uri uri, String name, long size, long durationMs, long dateAdded, String folder, String folderPath) {
             this.id = id;
             this.uri = uri;
             this.name = name;
@@ -124,12 +125,41 @@ public class MainActivity extends Activity {
             this.durationMs = durationMs;
             this.dateAdded = dateAdded;
             this.folder = folder;
+            this.folderPath = folderPath;
+        }
+
+        /** File name without the extension, which is what VLC shows and groups by. */
+        String title() {
+            int dot = name.lastIndexOf('.');
+            return dot > 0 ? name.substring(0, dot) : name;
         }
     }
 
+    /** A bundle of videos: one of VLC's name groups, or a folder. */
+    static final class Group {
+        final String key;
+        String name;
+        final List<Video> videos = new ArrayList<>();
+        long size, newest, oldest = Long.MAX_VALUE;
+
+        Group(String key) { this.key = key; }
+
+        void add(Video v) {
+            videos.add(v);
+            size += v.size;
+            newest = Math.max(newest, v.dateAdded);
+            oldest = Math.min(oldest, v.dateAdded);
+        }
+    }
+
+    private static final int GROUP_VLC = 0, GROUP_FOLDER = 1, GROUP_NONE = 2;
+    private static final String[] GROUP_LABELS = {"Like VLC (by name)", "By folder", "Don't group"};
+
     private final List<Video> allVideos = new ArrayList<>();
-    private final List<Video> shown = new ArrayList<>();
-    private String folderFilter; // null = all folders
+    private final List<Object> shown = new ArrayList<>(); // Videos and Groups
+    private int groupMode = GROUP_VLC;
+    private int groupLen = 6;   // VLC groups videos whose names share this many first letters
+    private String openGroup;   // key of the group being viewed, or null for the top level
 
     private VideoAdapter adapter;
     private ListView list;
@@ -138,9 +168,9 @@ public class MainActivity extends Activity {
     private Button emptyButton;
 
     // Header views
+    private View headerContent;
     private TextView totalSize, totalCount, legend, freedText;
     private StorageBar storageBar;
-    private LinearLayout chipRow;
 
     // Thumbnails
     private final LruCache<Long, Bitmap> thumbs = new LruCache<Long, Bitmap>((int) (Runtime.getRuntime().maxMemory() / 8)) {
@@ -163,10 +193,12 @@ public class MainActivity extends Activity {
 
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         sortMode = prefs.getInt("sort", SORT_SIZE);
+        groupMode = prefs.getInt("group", GROUP_VLC);
+        groupLen = prefs.getInt("groupLen", 6);
 
         if (savedInstanceState != null) {
             freedThisSession = savedInstanceState.getLong("freed");
-            folderFilter = savedInstanceState.getString("folder");
+            openGroup = savedInstanceState.getString("openGroup");
             if (savedInstanceState.containsKey("cur_id")) {
                 current = new Video(
                         savedInstanceState.getLong("cur_id"),
@@ -174,7 +206,7 @@ public class MainActivity extends Activity {
                         savedInstanceState.getString("cur_name"),
                         savedInstanceState.getLong("cur_size"),
                         savedInstanceState.getLong("cur_dur"),
-                        0, "");
+                        0, "", "");
             }
         }
 
@@ -207,7 +239,7 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         out.putLong("freed", freedThisSession);
-        out.putString("folder", folderFilter);
+        out.putString("openGroup", openGroup);
         if (current != null) {
             out.putLong("cur_id", current.id);
             out.putString("cur_uri", current.uri.toString());
@@ -234,6 +266,7 @@ public class MainActivity extends Activity {
         list.setOnItemClickListener((p, v, pos, id) -> {
             Object o = p.getItemAtPosition(pos);
             if (o instanceof Video) playInVlc((Video) o);
+            else if (o instanceof Group) openGroup(((Group) o).key);
         });
         list.setOnItemLongClickListener((p, v, pos, id) -> {
             Object o = p.getItemAtPosition(pos);
@@ -303,22 +336,16 @@ public class MainActivity extends Activity {
 
         h.addView(card, new LinearLayout.LayoutParams(-1, -2));
 
-        // Folder filter chips
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        chipRow = new LinearLayout(this);
-        chipRow.setOrientation(LinearLayout.HORIZONTAL);
-        scroll.addView(chipRow);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
-        sp.topMargin = dp(14);
-        h.addView(scroll, sp);
-
         TextView hint = text(13, C_TEXT_2, false);
         hint.setText("Tap a video to watch it in VLC. When you're done, you'll be asked whether to keep it.");
         hint.setPadding(dp(4), dp(12), dp(4), dp(2));
         h.addView(hint);
 
-        return h;
+        // Wrapped so the whole header can be hidden while a group is open.
+        headerContent = h;
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.addView(h);
+        return wrap;
     }
 
     private void showEmpty(String message, String buttonLabel, View.OnClickListener onClick) {
@@ -371,45 +398,6 @@ public class MainActivity extends Activity {
                 start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
-    private void updateChips() {
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (Video v : allVideos) {
-            String f = folderOf(v);
-            Integer c = counts.get(f);
-            counts.put(f, c == null ? 1 : c + 1);
-        }
-        if (folderFilter != null && !counts.containsKey(folderFilter)) folderFilter = null;
-
-        // Biggest folders first
-        List<Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
-        Collections.sort(entries, (a, b) -> b.getValue() - a.getValue());
-
-        chipRow.removeAllViews();
-        chipRow.addView(chip("All  " + allVideos.size(), folderFilter == null, null));
-        for (Map.Entry<String, Integer> e : entries) {
-            chipRow.addView(chip(e.getKey() + "  " + e.getValue(), e.getKey().equals(folderFilter), e.getKey()));
-        }
-        // Hide chips when everything is in one folder
-        ((View) chipRow.getParent()).setVisibility(counts.size() > 1 ? View.VISIBLE : View.GONE);
-    }
-
-    private View chip(String label, boolean selected, String folder) {
-        TextView t = text(14, selected ? 0xFF000000 : C_TEXT, selected);
-        t.setText(label);
-        t.setPadding(dp(14), dp(8), dp(14), dp(8));
-        t.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), pill(selected ? C_ACCENT : C_CARD), null));
-        t.setOnClickListener(v -> {
-            folderFilter = folder;
-            applyFilter();
-            updateChips();
-            list.setSelection(0);
-        });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.rightMargin = dp(8);
-        t.setLayoutParams(lp);
-        return t;
-    }
-
     private static String folderOf(Video v) {
         return v.folder == null || v.folder.isEmpty() ? "Other" : v.folder;
     }
@@ -419,8 +407,35 @@ public class MainActivity extends Activity {
         menu.add(0, 1, 0, "Sort")
                 .setIcon(R.drawable.ic_sort)
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
-        menu.add(0, 2, 1, "Refresh");
+        menu.add(0, 3, 1, "Group videos…");
+        menu.add(0, 4, 2, "Group name length…");
+        menu.add(0, 2, 3, "Refresh");
         return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem len = menu.findItem(4);
+        if (len != null) len.setVisible(groupMode == GROUP_VLC);
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (openGroup != null) closeGroup();
+        else super.onBackPressed();
+    }
+
+    private void openGroup(String key) {
+        openGroup = key;
+        applyFilter();
+        list.setSelection(0);
+    }
+
+    private void closeGroup() {
+        openGroup = null;
+        applyFilter();
+        list.setSelection(0);
     }
 
     @Override
@@ -431,6 +446,37 @@ public class MainActivity extends Activity {
                     .setSingleChoiceItems(SORT_LABELS, sortMode, (d, which) -> {
                         sortMode = which;
                         getPreferences(MODE_PRIVATE).edit().putInt("sort", sortMode).apply();
+                        applyFilter();
+                        list.setSelection(0);
+                        d.dismiss();
+                    })
+                    .show();
+            return true;
+        } else if (item.getItemId() == android.R.id.home) {
+            closeGroup();
+            return true;
+        } else if (item.getItemId() == 3) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Group videos")
+                    .setSingleChoiceItems(GROUP_LABELS, groupMode, (d, which) -> {
+                        groupMode = which;
+                        openGroup = null;
+                        getPreferences(MODE_PRIVATE).edit().putInt("group", groupMode).apply();
+                        applyFilter();
+                        list.setSelection(0);
+                        d.dismiss();
+                    })
+                    .show();
+            return true;
+        } else if (item.getItemId() == 4) {
+            final String[] labels = new String[12];
+            for (int i = 0; i < labels.length; i++) labels[i] = (i + 1) + (i == 5 ? " letters (VLC's default)" : i == 0 ? " letter" : " letters");
+            new AlertDialog.Builder(this)
+                    .setTitle("Group videos whose names start with the same…")
+                    .setSingleChoiceItems(labels, groupLen - 1, (d, which) -> {
+                        groupLen = which + 1;
+                        openGroup = null;
+                        getPreferences(MODE_PRIVATE).edit().putInt("groupLen", groupLen).apply();
                         applyFilter();
                         list.setSelection(0);
                         d.dismiss();
@@ -449,13 +495,15 @@ public class MainActivity extends Activity {
         ImageView thumb;
         TextView duration, title, meta;
         ImageButton delete;
+        TextView chevron;
         Video video;
     }
 
     private final class VideoAdapter extends BaseAdapter {
         @Override public int getCount() { return shown.size(); }
         @Override public Object getItem(int i) { return shown.get(i); }
-        @Override public long getItemId(int i) { return shown.get(i).id; }
+        @Override public long getItemId(int i) { return i; }
+        @Override public int getViewTypeCount() { return 1; }
 
         @Override
         public View getView(int i, View convert, ViewGroup parent) {
@@ -469,8 +517,15 @@ public class MainActivity extends Activity {
                 view = convert;
                 r = (Row) convert.getTag();
             }
-            Video v = shown.get(i);
+            Object item = shown.get(i);
+            if (item instanceof Group) {
+                bindGroup(r, (Group) item);
+                return view;
+            }
+            Video v = (Video) item;
             r.video = v;
+            r.delete.setVisibility(View.VISIBLE);
+            r.chevron.setVisibility(View.GONE);
             r.title.setText(v.name);
             r.duration.setText(v.durationMs > 0 ? time(v.durationMs) : "");
             r.duration.setVisibility(v.durationMs > 0 ? View.VISIBLE : View.GONE);
@@ -485,6 +540,23 @@ public class MainActivity extends Activity {
             loadThumb(v, r.thumb);
             return view;
         }
+    }
+
+    private void bindGroup(Row r, Group g) {
+        r.video = null;
+        r.delete.setVisibility(View.GONE);
+        r.chevron.setVisibility(View.VISIBLE);
+        r.title.setText(g.name);
+        r.duration.setVisibility(View.VISIBLE);
+        r.duration.setText("▤ " + g.videos.size());
+        SpannableStringBuilder meta = new SpannableStringBuilder(size(g.size));
+        meta.setSpan(new ForegroundColorSpan(C_ACCENT), 0, meta.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        meta.append("  ·  ").append(String.valueOf(g.videos.size())).append(" videos");
+        r.meta.setText(meta);
+        // Use the biggest video in the group for the picture.
+        Video cover = g.videos.get(0);
+        for (Video v : g.videos) if (v.size > cover.size) cover = v;
+        loadThumb(cover, r.thumb);
     }
 
     private View buildRow(Row r) {
@@ -542,6 +614,13 @@ public class MainActivity extends Activity {
             askToDelete(current, null);
         });
         card.addView(r.delete, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        // Arrow shown on groups instead of the delete button
+        r.chevron = text(28, C_TEXT_2, false);
+        r.chevron.setText("›");
+        r.chevron.setGravity(Gravity.CENTER);
+        r.chevron.setVisibility(View.GONE);
+        card.addView(r.chevron, new LinearLayout.LayoutParams(dp(40), dp(48)));
 
         return outer;
     }
@@ -632,6 +711,7 @@ public class MainActivity extends Activity {
                 MediaStore.Video.Media.DURATION,
                 MediaStore.Video.Media.DATE_ADDED,
                 MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
+                Build.VERSION.SDK_INT >= 29 ? MediaStore.Video.Media.RELATIVE_PATH : MediaStore.Video.Media.DATA,
         };
         try (Cursor c = getContentResolver().query(collection, projection, null, null, null)) {
             if (c != null) {
@@ -645,7 +725,8 @@ public class MainActivity extends Activity {
                             c.getLong(2),
                             c.getLong(3),
                             c.getLong(4),
-                            c.getString(5)));
+                            c.getString(5),
+                            folderPathOf(c.getString(6))));
                 }
             }
         } catch (Exception e) {
@@ -657,27 +738,97 @@ public class MainActivity extends Activity {
             return;
         }
         emptyView.setVisibility(View.GONE);
-        updateChips();
         applyFilter();
         updateHeader();
     }
 
+    /** On Android 10+ this is already the folder path; on older versions it's the file path. */
+    private static String folderPathOf(String s) {
+        if (s == null) return "";
+        if (Build.VERSION.SDK_INT >= 29) return s;
+        int slash = s.lastIndexOf('/');
+        return slash > 0 ? s.substring(0, slash) : s;
+    }
+
+    /** The key VLC would group this video under: the first few letters of its name, ignoring case and a leading "The ". */
+    private String vlcGroupKey(Video v) {
+        String t = v.title().trim().toLowerCase(Locale.ROOT);
+        if (t.startsWith("the ")) t = t.substring(4);
+        return t.length() > groupLen ? t.substring(0, groupLen) : t;
+    }
+
+    /** Builds what's on screen: the groups (plus loose videos), or the videos inside the open group. */
     private void applyFilter() {
         shown.clear();
-        for (Video v : allVideos) {
-            if (folderFilter == null || folderFilter.equals(folderOf(v))) shown.add(v);
+
+        Map<String, Group> groups = new LinkedHashMap<>();
+        if (groupMode != GROUP_NONE) {
+            for (Video v : allVideos) {
+                String key = groupMode == GROUP_FOLDER ? "f:" + v.folderPath + "/" + folderOf(v) : "n:" + vlcGroupKey(v);
+                Group g = groups.get(key);
+                if (g == null) groups.put(key, g = new Group(key));
+                g.add(v);
+            }
+            for (Group g : groups.values()) g.name = groupMode == GROUP_FOLDER ? folderOf(g.videos.get(0)) : commonPrefix(g.videos);
         }
-        Comparator<Video> cmp;
+
+        Group open = openGroup != null ? groups.get(openGroup) : null;
+        if (openGroup != null && open == null) openGroup = null; // group no longer exists (e.g. emptied)
+
+        List<Video> videos = new ArrayList<>();
+        if (open != null) {
+            videos.addAll(open.videos);
+            shown.addAll(videos);
+        } else if (groupMode == GROUP_NONE) {
+            shown.addAll(allVideos);
+        } else {
+            for (Group g : groups.values()) {
+                // Like VLC, a "group" of one by name is just shown as the video.
+                if (g.videos.size() == 1 && groupMode == GROUP_VLC) shown.add(g.videos.get(0));
+                else shown.add(g);
+            }
+        }
+
+        Comparator<Object> cmp;
         switch (sortMode) {
-            case SORT_NEWEST: cmp = (a, b) -> Long.compare(b.dateAdded, a.dateAdded); break;
-            case SORT_OLDEST: cmp = (a, b) -> Long.compare(a.dateAdded, b.dateAdded); break;
-            case SORT_NAME:   cmp = (a, b) -> a.name.compareToIgnoreCase(b.name); break;
-            default:          cmp = (a, b) -> Long.compare(b.size, a.size); break;
+            case SORT_NEWEST: cmp = (a, b) -> Long.compare(newestOf(b), newestOf(a)); break;
+            case SORT_OLDEST: cmp = (a, b) -> Long.compare(oldestOf(a), oldestOf(b)); break;
+            case SORT_NAME:   cmp = (a, b) -> nameOf(a).compareToIgnoreCase(nameOf(b)); break;
+            default:          cmp = (a, b) -> Long.compare(sizeOf(b), sizeOf(a)); break;
         }
         Collections.sort(shown, cmp);
         adapter.notifyDataSetChanged();
-        if (getActionBar() != null) getActionBar().setSubtitle(SORT_LABELS[sortMode]);
+
+        if (getActionBar() != null) {
+            getActionBar().setDisplayHomeAsUpEnabled(open != null);
+            if (open != null) {
+                getActionBar().setTitle(open.name);
+                getActionBar().setSubtitle(open.videos.size() + " videos · " + size(open.size));
+            } else {
+                getActionBar().setTitle("VLC Cleanup");
+                getActionBar().setSubtitle(SORT_LABELS[sortMode]);
+            }
+        }
+        headerContent.setVisibility(open != null ? View.GONE : View.VISIBLE);
     }
+
+    /** VLC names a group after the beginning that all its videos' names share. */
+    private static String commonPrefix(List<Video> vs) {
+        String p = vs.get(0).title();
+        for (Video v : vs) {
+            String t = v.title();
+            int n = 0, max = Math.min(p.length(), t.length());
+            while (n < max && Character.toLowerCase(p.charAt(n)) == Character.toLowerCase(t.charAt(n))) n++;
+            p = p.substring(0, n);
+        }
+        p = p.trim();
+        return p.isEmpty() ? vs.get(0).title() : p;
+    }
+
+    private static long sizeOf(Object o) { return o instanceof Group ? ((Group) o).size : ((Video) o).size; }
+    private static long newestOf(Object o) { return o instanceof Group ? ((Group) o).newest : ((Video) o).dateAdded; }
+    private static long oldestOf(Object o) { return o instanceof Group ? ((Group) o).oldest : ((Video) o).dateAdded; }
+    private static String nameOf(Object o) { return o instanceof Group ? ((Group) o).name : ((Video) o).name; }
 
     // ---------------------------------------------------------------- VLC
 
