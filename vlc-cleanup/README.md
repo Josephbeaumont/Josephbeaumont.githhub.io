@@ -21,6 +21,13 @@ Tap a group to open it. In the ⋮ menu you can group by folder instead, turn gr
 or change the number of letters to match VLC's own setting. Groups you made by hand in VLC
 can't be copied, because VLC keeps them private.
 
+### Making a group from a Google Photos album
+
+Google Photos doesn't let other apps read albums, so share the videos instead: open the
+album in Google Photos, select all its videos, tap **Share → VLC Cleanup**, name the group and
+tap **Save**. VLC Cleanup matches them to the videos on your phone. Long-press the group to
+rename or remove it (removing a group never deletes videos). This is also in the ⋮ menu.
+
 Use the sort button (top right) to sort by size, newest, oldest or name.
 
 ## Install

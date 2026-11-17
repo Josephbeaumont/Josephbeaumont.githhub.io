@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
+import android.app.ProgressDialog;
 import android.app.RecoverableSecurityException;
 import android.content.ActivityNotFoundException;
 import android.content.ContentUris;
@@ -33,6 +34,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.StatFs;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -51,6 +53,7 @@ import android.view.ViewOutlineProvider;
 import android.widget.AbsListView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
@@ -70,6 +73,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -141,6 +149,7 @@ public class MainActivity extends Activity {
         String name;
         final List<Video> videos = new ArrayList<>();
         long size, newest, oldest = Long.MAX_VALUE;
+        int albumIndex = -1; // >= 0 for groups you made from a Google Photos album
 
         Group(String key) { this.key = key; }
 
@@ -154,6 +163,15 @@ public class MainActivity extends Activity {
 
     private static final int GROUP_VLC = 0, GROUP_FOLDER = 1, GROUP_NONE = 2;
     private static final String[] GROUP_LABELS = {"Like VLC (by name)", "By folder", "Don't group"};
+
+    /** A group you made by sharing an album (e.g. from Google Photos) to this app. */
+    static final class Album {
+        String name;
+        final List<Long> ids = new ArrayList<>();
+    }
+
+    private final List<Album> albums = new ArrayList<>();
+    private List<Uri> pendingShare; // videos shared to us, waiting to be matched
 
     private final List<Video> allVideos = new ArrayList<>();
     private final List<Object> shown = new ArrayList<>(); // Videos and Groups
@@ -216,11 +234,19 @@ public class MainActivity extends Activity {
         }
         buildUi();
 
+        if (savedInstanceState == null) handleShare(getIntent());
+
         if (!hasReadPermission()) {
             showEmpty("VLC Cleanup needs access to your videos so it can list them and offer to delete the ones you're done with.",
                     "Allow access", v -> requestReadPermission());
             requestReadPermission();
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleShare(intent);
     }
 
     @Override
@@ -270,6 +296,10 @@ public class MainActivity extends Activity {
         });
         list.setOnItemLongClickListener((p, v, pos, id) -> {
             Object o = p.getItemAtPosition(pos);
+            if (o instanceof Group && ((Group) o).albumIndex >= 0) {
+                manageAlbum((Group) o);
+                return true;
+            }
             if (!(o instanceof Video)) return false;
             current = (Video) o;
             askToDelete(current, null);
@@ -409,7 +439,8 @@ public class MainActivity extends Activity {
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
         menu.add(0, 3, 1, "Group videos…");
         menu.add(0, 4, 2, "Group name length…");
-        menu.add(0, 2, 3, "Refresh");
+        menu.add(0, 5, 3, "Add a Google Photos album…");
+        menu.add(0, 2, 4, "Refresh");
         return true;
     }
 
@@ -483,6 +514,9 @@ public class MainActivity extends Activity {
                     })
                     .show();
             return true;
+        } else if (item.getItemId() == 5) {
+            showAlbumHelp();
+            return true;
         } else if (item.getItemId() == 2) {
             if (hasReadPermission()) loadVideos();
             return true;
@@ -552,6 +586,7 @@ public class MainActivity extends Activity {
         SpannableStringBuilder meta = new SpannableStringBuilder(size(g.size));
         meta.setSpan(new ForegroundColorSpan(C_ACCENT), 0, meta.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         meta.append("  ·  ").append(String.valueOf(g.videos.size())).append(" videos");
+        if (g.albumIndex >= 0) meta.append("\nYour album");
         r.meta.setText(meta);
         // Use the biggest video in the group for the picture.
         Video cover = g.videos.get(0);
@@ -738,8 +773,10 @@ public class MainActivity extends Activity {
             return;
         }
         emptyView.setVisibility(View.GONE);
+        loadAlbums();
         applyFilter();
         updateHeader();
+        if (pendingShare != null) matchShared();
     }
 
     /** On Android 10+ this is already the folder path; on older versions it's the file path. */
@@ -762,14 +799,32 @@ public class MainActivity extends Activity {
         shown.clear();
 
         Map<String, Group> groups = new LinkedHashMap<>();
+        Set<Long> inAlbum = new HashSet<>();
         if (groupMode != GROUP_NONE) {
+            // Your own albums come first; their videos leave the automatic groups, like in VLC.
+            Map<Long, Video> byId = new java.util.HashMap<>();
+            for (Video v : allVideos) byId.put(v.id, v);
+            for (int i = 0; i < albums.size(); i++) {
+                Group g = new Group("a:" + i);
+                g.albumIndex = i;
+                g.name = albums.get(i).name;
+                for (Long id : albums.get(i).ids) {
+                    Video v = byId.get(id);
+                    if (v != null && !g.videos.contains(v)) {
+                        g.add(v);
+                        inAlbum.add(id);
+                    }
+                }
+                if (!g.videos.isEmpty()) groups.put(g.key, g);
+            }
             for (Video v : allVideos) {
+                if (inAlbum.contains(v.id)) continue;
                 String key = groupMode == GROUP_FOLDER ? "f:" + v.folderPath + "/" + folderOf(v) : "n:" + vlcGroupKey(v);
                 Group g = groups.get(key);
                 if (g == null) groups.put(key, g = new Group(key));
                 g.add(v);
             }
-            for (Group g : groups.values()) g.name = groupMode == GROUP_FOLDER ? folderOf(g.videos.get(0)) : commonPrefix(g.videos);
+            for (Group g : groups.values()) if (g.albumIndex < 0) g.name = groupMode == GROUP_FOLDER ? folderOf(g.videos.get(0)) : commonPrefix(g.videos);
         }
 
         Group open = openGroup != null ? groups.get(openGroup) : null;
@@ -784,7 +839,7 @@ public class MainActivity extends Activity {
         } else {
             for (Group g : groups.values()) {
                 // Like VLC, a "group" of one by name is just shown as the video.
-                if (g.videos.size() == 1 && groupMode == GROUP_VLC) shown.add(g.videos.get(0));
+                if (g.videos.size() == 1 && groupMode == GROUP_VLC && g.albumIndex < 0) shown.add(g.videos.get(0));
                 else shown.add(g);
             }
         }
@@ -829,6 +884,227 @@ public class MainActivity extends Activity {
     private static long newestOf(Object o) { return o instanceof Group ? ((Group) o).newest : ((Video) o).dateAdded; }
     private static long oldestOf(Object o) { return o instanceof Group ? ((Group) o).oldest : ((Video) o).dateAdded; }
     private static String nameOf(Object o) { return o instanceof Group ? ((Group) o).name : ((Video) o).name; }
+
+    // ---------------------------------------------------------------- albums shared from Google Photos
+
+    private void loadAlbums() {
+        albums.clear();
+        try {
+            JSONArray arr = new JSONArray(getPreferences(MODE_PRIVATE).getString("albums", "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                Album a = new Album();
+                a.name = o.getString("name");
+                JSONArray ids = o.getJSONArray("ids");
+                for (int j = 0; j < ids.length(); j++) a.ids.add(ids.getLong(j));
+                albums.add(a);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void saveAlbums() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (Album a : albums) {
+                JSONObject o = new JSONObject();
+                o.put("name", a.name);
+                JSONArray ids = new JSONArray();
+                for (Long id : a.ids) ids.put(id);
+                o.put("ids", ids);
+                arr.put(o);
+            }
+            getPreferences(MODE_PRIVATE).edit().putString("albums", arr.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void showAlbumHelp() {
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("Add a Google Photos album")
+                .setMessage("Google Photos doesn't let other apps read your albums, but you can share an album's videos here:\n\n"
+                        + "1. In Google Photos, open the album.\n"
+                        + "2. Tap ⋮ → Select (or long-press the first video), then select all of them.\n"
+                        + "3. Tap Share and pick VLC Cleanup.\n"
+                        + "4. Name the group and tap Save.\n\n"
+                        + "Only videos stored on this phone can be matched.")
+                .setNegativeButton("Close", null);
+        Intent photos = getPackageManager().getLaunchIntentForPackage("com.google.android.apps.photos");
+        if (photos != null) b.setPositiveButton("Open Google Photos", (d, w) -> startActivity(photos));
+        b.show();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void handleShare(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) return;
+        setIntent(new Intent(this, MainActivity.class)); // handled; don't do it again on rotation
+
+        List<Uri> uris = new ArrayList<>();
+        if (Intent.ACTION_SEND.equals(action)) {
+            Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (u != null) uris.add(u);
+        } else {
+            ArrayList<Uri> l = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (l != null) uris.addAll(l);
+        }
+        if (uris.isEmpty() && intent.getClipData() != null) {
+            for (int i = 0; i < intent.getClipData().getItemCount(); i++) {
+                Uri u = intent.getClipData().getItemAt(i).getUri();
+                if (u != null) uris.add(u);
+            }
+        }
+        if (uris.isEmpty()) {
+            Toast.makeText(this, "Nothing to add was shared.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        pendingShare = uris;
+        if (hasReadPermission() && !allVideos.isEmpty()) matchShared();
+        // otherwise loadVideos() picks it up once the videos are loaded
+    }
+
+    private static final Pattern MEDIA_ID = Pattern.compile("content://media/[^/]+/(?:video|file|images)/media/(\\d+)");
+
+    /** Google Photos often puts the phone's own media link inside the shared link; use it if it's there. */
+    private static Long embeddedMediaId(Uri u) {
+        Matcher m = MEDIA_ID.matcher(Uri.decode(u.toString()));
+        return m.find() ? Long.valueOf(m.group(1)) : null;
+    }
+
+    /** Works out which of the phone's videos the shared items are, then asks for a group name. */
+    private void matchShared() {
+        final List<Uri> uris = pendingShare;
+        pendingShare = null;
+        if (uris == null) return;
+
+        final Map<Long, Video> byId = new java.util.HashMap<>();
+        final Map<String, Video> byNameSize = new java.util.HashMap<>();
+        final Map<String, Video> byName = new java.util.HashMap<>();
+        final Set<String> dupNames = new HashSet<>();
+        for (Video v : allVideos) {
+            byId.put(v.id, v);
+            String n = v.name.toLowerCase(Locale.ROOT);
+            byNameSize.put(n + "|" + v.size, v);
+            if (byName.put(n, v) != null) dupNames.add(n);
+        }
+        for (String n : dupNames) byName.remove(n); // names on more than one video aren't safe to match alone
+
+        final ProgressDialog progress = ProgressDialog.show(this, null, "Finding " + uris.size() + " videos on your phone…", true);
+        pool.execute(() -> {
+            List<Long> matched = new ArrayList<>();
+            for (Uri u : uris) {
+                Video v = null;
+                Long embedded = embeddedMediaId(u);
+                if (embedded != null) v = byId.get(embedded);
+                if (v == null) {
+                    String name = null;
+                    long size = -1;
+                    try (Cursor c = getContentResolver().query(u, null, null, null, null)) {
+                        if (c != null && c.moveToFirst()) {
+                            int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                            int si = c.getColumnIndex(OpenableColumns.SIZE);
+                            if (ni >= 0) name = c.getString(ni);
+                            if (si >= 0 && !c.isNull(si)) size = c.getLong(si);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                    if (name != null) {
+                        String n = name.toLowerCase(Locale.ROOT);
+                        v = byNameSize.get(n + "|" + size);
+                        if (v == null) v = byName.get(n);
+                    }
+                }
+                if (v != null && !matched.contains(v.id)) matched.add(v.id);
+            }
+            main.post(() -> {
+                try { progress.dismiss(); } catch (Exception ignored) { }
+                if (!isFinishing()) askAlbumName(matched, uris.size());
+            });
+        });
+    }
+
+    private void askAlbumName(List<Long> matched, int total) {
+        if (matched.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("No videos matched")
+                    .setMessage("None of the " + total + " shared items match a video stored on this phone. "
+                            + "Videos that are only in the cloud can't be grouped here.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+        final EditText input = new EditText(this);
+        input.setSingleLine();
+        input.setText("My album");
+        input.selectAll();
+        FrameLayout pad = new FrameLayout(this);
+        pad.setPadding(dp(22), dp(4), dp(22), 0);
+        pad.addView(input);
+
+        String msg = "Found " + matched.size() + " of the " + total + " shared items on this phone.";
+        if (matched.size() < total) msg += " The rest are photos, are only in the cloud, or couldn't be matched.";
+        msg += "\n\nName this group:";
+
+        new AlertDialog.Builder(this)
+                .setTitle("Make a group")
+                .setMessage(msg)
+                .setView(pad)
+                .setPositiveButton("Save", (d, w) -> {
+                    Album a = new Album();
+                    String name = input.getText().toString().trim();
+                    a.name = name.isEmpty() ? "My album" : name;
+                    a.ids.addAll(matched);
+                    loadAlbums();
+                    albums.add(a);
+                    saveAlbums();
+                    if (groupMode == GROUP_NONE) {
+                        groupMode = GROUP_VLC;
+                        getPreferences(MODE_PRIVATE).edit().putInt("group", groupMode).apply();
+                    }
+                    openGroup = null;
+                    applyFilter();
+                    list.setSelection(0);
+                    Toast.makeText(this, "Saved \"" + a.name + "\" with " + matched.size() + " videos", Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void manageAlbum(Group g) {
+        new AlertDialog.Builder(this)
+                .setTitle(g.name)
+                .setItems(new String[]{"Rename group", "Remove group (keeps the videos)"}, (d, which) -> {
+                    if (which == 0) {
+                        final EditText input = new EditText(this);
+                        input.setSingleLine();
+                        input.setText(g.name);
+                        input.selectAll();
+                        FrameLayout pad = new FrameLayout(this);
+                        pad.setPadding(dp(22), dp(8), dp(22), 0);
+                        pad.addView(input);
+                        new AlertDialog.Builder(this)
+                                .setTitle("Rename group")
+                                .setView(pad)
+                                .setPositiveButton("Save", (d2, w2) -> {
+                                    String name = input.getText().toString().trim();
+                                    if (!name.isEmpty()) {
+                                        albums.get(g.albumIndex).name = name;
+                                        saveAlbums();
+                                        applyFilter();
+                                    }
+                                })
+                                .setNegativeButton("Cancel", null)
+                                .show();
+                    } else {
+                        albums.remove(g.albumIndex);
+                        saveAlbums();
+                        openGroup = null;
+                        applyFilter();
+                    }
+                })
+                .show();
+    }
 
     // ---------------------------------------------------------------- VLC
 
