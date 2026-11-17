@@ -965,9 +965,24 @@ public class MainActivity extends Activity {
                 uris.add(data.getData());
             }
         }
-        if (uris.isEmpty()) return;
+        if (uris.isEmpty()) {
+            nothingCameBack("Google Photos sent back 0 videos.");
+            return;
+        }
+        Toast.makeText(this, "Got " + uris.size() + " videos from Google Photos. Matching…", Toast.LENGTH_LONG).show();
         pendingShare = uris;
         if (!allVideos.isEmpty()) matchShared();
+    }
+
+    private void nothingCameBack(String what) {
+        new AlertDialog.Builder(this)
+                .setTitle("No videos received")
+                .setMessage(what + "\n\nThis can happen when a lot of videos are selected at once. "
+                        + "Try picking about 50, save them as a group, then pick the next batch and choose "
+                        + "\"Add to existing group\".")
+                .setPositiveButton("Try again", (d, w) -> pickFromPhotos())
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     @SuppressWarnings("deprecation")
@@ -1018,13 +1033,17 @@ public class MainActivity extends Activity {
         final Map<String, Video> byNameSize = new java.util.HashMap<>();
         final Map<String, Video> byName = new java.util.HashMap<>();
         final Set<String> dupNames = new HashSet<>();
+        final Map<Long, Video> bySize = new java.util.HashMap<>();
+        final Set<Long> dupSizes = new HashSet<>();
         for (Video v : allVideos) {
             byId.put(v.id, v);
+            if (v.size > 0 && bySize.put(v.size, v) != null) dupSizes.add(v.size);
             String n = v.name.toLowerCase(Locale.ROOT);
             byNameSize.put(n + "|" + v.size, v);
             if (byName.put(n, v) != null) dupNames.add(n);
         }
         for (String n : dupNames) byName.remove(n); // names on more than one video aren't safe to match alone
+        for (Long sz : dupSizes) bySize.remove(sz);  // same for sizes
 
         final ProgressDialog progress = ProgressDialog.show(this, null, "Finding " + uris.size() + " videos on your phone…", true);
         pool.execute(() -> {
@@ -1050,6 +1069,8 @@ public class MainActivity extends Activity {
                         v = byNameSize.get(n + "|" + size);
                         if (v == null) v = byName.get(n);
                     }
+                    // Exact file size is unique enough for videos when the name doesn't match.
+                    if (v == null && size > 0) v = bySize.get(size);
                 }
                 if (v != null && !matched.contains(v.id)) matched.add(v.id);
             }
@@ -1225,6 +1246,7 @@ public class MainActivity extends Activity {
 
         } else if (requestCode == REQ_PICK) {
             if (resultCode == RESULT_OK) onPicked(data);
+            else nothingCameBack("Google Photos closed without sending any videos back (code " + resultCode + ").");
 
         } else if (requestCode == REQ_DELETE_RETRY) {
             // Android 10: user granted access, so try deleting again.
