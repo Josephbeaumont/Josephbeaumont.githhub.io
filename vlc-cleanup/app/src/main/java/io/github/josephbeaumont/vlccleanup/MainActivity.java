@@ -101,8 +101,8 @@ public class MainActivity extends Activity {
     private static final int VLC_HW_ACCEL_ERROR = 4;
     private static final int VLC_VIDEO_TRACK_LOST = 5;
 
-    private static final int SORT_SIZE = 0, SORT_NEWEST = 1, SORT_OLDEST = 2, SORT_NAME = 3;
-    private static final String[] SORT_LABELS = {"Biggest first", "Newest first", "Oldest first", "Name"};
+    private static final int SORT_SIZE = 0, SORT_NEWEST = 1, SORT_OLDEST = 2, SORT_NAME = 3, SORT_LONGEST = 4, SORT_SHORTEST = 5;
+    private static final String[] SORT_LABELS = {"Biggest first", "Newest first", "Oldest first", "Name", "Longest first", "Shortest first"};
 
     // Colours
     private static final int C_BG = 0xFF121316;
@@ -149,7 +149,7 @@ public class MainActivity extends Activity {
         final String key;
         String name;
         final List<Video> videos = new ArrayList<>();
-        long size, newest, oldest = Long.MAX_VALUE;
+        long size, durationMs, newest, oldest = Long.MAX_VALUE;
         int albumIndex = -1; // >= 0 for groups you made from a Google Photos album
 
         Group(String key) { this.key = key; }
@@ -157,6 +157,7 @@ public class MainActivity extends Activity {
         void add(Video v) {
             videos.add(v);
             size += v.size;
+            durationMs += Math.max(0, v.durationMs);
             newest = Math.max(newest, v.dateAdded);
             oldest = Math.min(oldest, v.dateAdded);
         }
@@ -675,6 +676,7 @@ public class MainActivity extends Activity {
         SpannableStringBuilder meta = new SpannableStringBuilder(size(g.size));
         meta.setSpan(new ForegroundColorSpan(C_ACCENT), 0, meta.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         meta.append("  ·  ").append(String.valueOf(g.videos.size())).append(" videos");
+        if (g.durationMs > 0) meta.append("  ·  ").append(time(g.durationMs));
         if (g.albumIndex >= 0) meta.append("\nYour album");
         r.meta.setText(meta);
         // Use the biggest video in the group for the picture.
@@ -942,6 +944,8 @@ public class MainActivity extends Activity {
             case SORT_NEWEST: cmp = (a, b) -> Long.compare(newestOf(b), newestOf(a)); break;
             case SORT_OLDEST: cmp = (a, b) -> Long.compare(oldestOf(a), oldestOf(b)); break;
             case SORT_NAME:   cmp = (a, b) -> nameOf(a).compareToIgnoreCase(nameOf(b)); break;
+            case SORT_LONGEST:  cmp = (a, b) -> Long.compare(lengthOf(b), lengthOf(a)); break;
+            case SORT_SHORTEST: cmp = (a, b) -> Long.compare(lengthOf(a), lengthOf(b)); break;
             default:          cmp = (a, b) -> Long.compare(sizeOf(b), sizeOf(a)); break;
         }
         Collections.sort(shown, cmp);
@@ -987,6 +991,7 @@ public class MainActivity extends Activity {
     private static long sizeOf(Object o) { return o instanceof Group ? ((Group) o).size : ((Video) o).size; }
     private static long newestOf(Object o) { return o instanceof Group ? ((Group) o).newest : ((Video) o).dateAdded; }
     private static long oldestOf(Object o) { return o instanceof Group ? ((Group) o).oldest : ((Video) o).dateAdded; }
+    private static long lengthOf(Object o) { return o instanceof Group ? ((Group) o).durationMs : ((Video) o).durationMs; }
     private static String nameOf(Object o) { return o instanceof Group ? ((Group) o).name : ((Video) o).name; }
 
     // ---------------------------------------------------------------- albums shared from Google Photos

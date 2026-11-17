@@ -32,7 +32,7 @@ rename or remove it (removing a group never deletes videos). This is also in the
 
 The **My groups** tab shows only the groups you made, with a button to make a new one.
 
-Use the sort button (top right) to sort by size, newest, oldest or name.
+Use the sort button (top right) to sort by size, newest, oldest, name, or length (longest or shortest first).
 
 ## Install
 
