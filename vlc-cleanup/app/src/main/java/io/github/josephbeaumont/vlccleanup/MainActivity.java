@@ -173,6 +173,7 @@ public class MainActivity extends Activity {
 
     private final List<Album> albums = new ArrayList<>();
     private List<Uri> pendingShare; // videos shared to us, waiting to be matched
+    private int addToAlbum = -1;    // when picking "more" for a group, the group to add them to
 
     private final List<Video> allVideos = new ArrayList<>();
     private final List<Object> shown = new ArrayList<>(); // Videos and Groups
@@ -218,6 +219,7 @@ public class MainActivity extends Activity {
         if (savedInstanceState != null) {
             freedThisSession = savedInstanceState.getLong("freed");
             openGroup = savedInstanceState.getString("openGroup");
+            addToAlbum = savedInstanceState.getInt("addToAlbum", -1);
             if (savedInstanceState.containsKey("cur_id")) {
                 current = new Video(
                         savedInstanceState.getLong("cur_id"),
@@ -267,6 +269,7 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(out);
         out.putLong("freed", freedThisSession);
         out.putString("openGroup", openGroup);
+        out.putInt("addToAlbum", addToAlbum);
         if (current != null) {
             out.putLong("cur_id", current.id);
             out.putString("cur_uri", current.uri.toString());
@@ -921,6 +924,7 @@ public class MainActivity extends Activity {
     }
 
     private void showAlbumHelp() {
+        addToAlbum = -1;
         new AlertDialog.Builder(this)
                 .setTitle("Add a Google Photos album")
                 .setMessage("Google Photos doesn't let other apps read your albums, but you can pick the album's videos:\n\n"
@@ -928,8 +932,8 @@ public class MainActivity extends Activity {
                         + "2. Go to the Albums tab and open your album.\n"
                         + "3. Select its videos (tap the first one, then the rest).\n"
                         + "4. Tap Done, then name the group.\n\n"
-                        + "If it won't let you pick them all at once, pick the rest afterwards and choose "
-                        + "\"Add to existing group\". Only videos stored on this phone can be matched.")
+                        + "Google Photos can't send 200+ videos at once, so pick about 100 at a time. "
+                        + "After each batch, tap Pick more to add the next ones to the same group.")
                 .setPositiveButton("Pick from Google Photos", (d, w) -> pickFromPhotos())
                 .setNegativeButton("Close", null)
                 .show();
@@ -978,8 +982,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("No videos received")
                 .setMessage(what + "\n\nThis can happen when a lot of videos are selected at once. "
-                        + "Try picking about 50, save them as a group, then pick the next batch and choose "
-                        + "\"Add to existing group\".")
+                        + "Try picking about 100 at a time.")
                 .setPositiveButton("Try again", (d, w) -> pickFromPhotos())
                 .setNegativeButton("Close", null)
                 .show();
@@ -1011,6 +1014,7 @@ public class MainActivity extends Activity {
             return;
         }
         pendingShare = uris;
+        addToAlbum = -1;
         if (hasReadPermission() && !allVideos.isEmpty()) matchShared();
         // otherwise loadVideos() picks it up once the videos are loaded
     }
@@ -1091,6 +1095,15 @@ public class MainActivity extends Activity {
                     .show();
             return;
         }
+        loadAlbums();
+        if (addToAlbum >= 0 && addToAlbum < albums.size()) {
+            int idx = addToAlbum;
+            addToAlbum = -1;
+            addVideosToAlbum(idx, matched, total);
+            return;
+        }
+        addToAlbum = -1;
+
         final EditText input = new EditText(this);
         input.setSingleLine();
         input.setText("My album");
@@ -1122,7 +1135,7 @@ public class MainActivity extends Activity {
                     openGroup = null;
                     applyFilter();
                     list.setSelection(0);
-                    Toast.makeText(this, "Saved \"" + a.name + "\" with " + matched.size() + " videos", Toast.LENGTH_LONG).show();
+                    offerPickMore(albums.size() - 1, "Saved \"" + a.name + "\" with " + matched.size() + " videos.");
                 })
                 .setNegativeButton("Cancel", null);
         loadAlbums();
@@ -1132,20 +1145,36 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < names.length; i++) names[i] = albums.get(i).name;
                 new AlertDialog.Builder(this)
                         .setTitle("Add " + matched.size() + " videos to…")
-                        .setItems(names, (d2, which) -> {
-                            Album a = albums.get(which);
-                            int before = a.ids.size();
-                            for (Long id : matched) if (!a.ids.contains(id)) a.ids.add(id);
-                            saveAlbums();
-                            openGroup = null;
-                            applyFilter();
-                            Toast.makeText(this, "Added " + (a.ids.size() - before) + " videos to \"" + a.name + "\" ("
-                                    + a.ids.size() + " total)", Toast.LENGTH_LONG).show();
-                        })
+                        .setItems(names, (d2, which) -> addVideosToAlbum(which, matched, total))
                         .show();
             });
         }
         b.show();
+    }
+
+    private void addVideosToAlbum(int idx, List<Long> matched, int total) {
+        Album a = albums.get(idx);
+        int before = a.ids.size();
+        for (Long id : matched) if (!a.ids.contains(id)) a.ids.add(id);
+        saveAlbums();
+        openGroup = null;
+        applyFilter();
+        String msg = "Added " + (a.ids.size() - before) + " videos to \"" + a.name + "\". It now has " + a.ids.size() + ".";
+        if (matched.size() < total) msg += "\n\n" + (total - matched.size()) + " of the picked items weren't found on this phone.";
+        offerPickMore(idx, msg);
+    }
+
+    /** After a batch, offer to pick the next batch straight into the same group. */
+    private void offerPickMore(int idx, String msg) {
+        new AlertDialog.Builder(this)
+                .setTitle("Done")
+                .setMessage(msg + "\n\nPick more videos for this group?")
+                .setPositiveButton("Pick more", (d, w) -> {
+                    addToAlbum = idx;
+                    pickFromPhotos();
+                })
+                .setNegativeButton("Finished", null)
+                .show();
     }
 
     private void manageAlbum(Group g) {
