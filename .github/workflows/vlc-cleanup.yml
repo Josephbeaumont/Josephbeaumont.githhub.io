@@ -1,0 +1,51 @@
+name: Build VLC Cleanup app
+
+on:
+  push:
+    paths:
+      - 'vlc-cleanup/**'
+      - '.github/workflows/vlc-cleanup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vlc-cleanup
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Build APK
+        run: gradle assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk VLC-Cleanup.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VLC-Cleanup
+          path: vlc-cleanup/VLC-Cleanup.apk
+
+      - name: Publish as a release (easy download from your phone)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vlc-cleanup-v${{ github.run_number }}
+          name: VLC Cleanup v1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          files: vlc-cleanup/VLC-Cleanup.apk
+          body: |
+            Android app: watch a video in VLC, then get asked whether to delete it.
+            Download **VLC-Cleanup.apk** below on your phone and open it to install.

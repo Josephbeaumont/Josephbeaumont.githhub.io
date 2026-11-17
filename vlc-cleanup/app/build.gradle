@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.josephbeaumont.vlccleanup'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.josephbeaumont.vlccleanup'
+        minSdk 21
+        targetSdk 34
+        // Each CI build gets a higher number so a new APK installs over the old one.
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger())
+        versionName "1.0.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
+    }
+
+    // A fixed key so every build can be installed as an update of the previous one.
+    // This is only for sideloading onto your own phone, not for the Play Store.
+    signingConfigs {
+        sideload {
+            storeFile file('sideload.keystore')
+            storePassword 'android'
+            keyAlias 'sideload'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.sideload
+        }
+        debug {
+            signingConfig signingConfigs.sideload
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
