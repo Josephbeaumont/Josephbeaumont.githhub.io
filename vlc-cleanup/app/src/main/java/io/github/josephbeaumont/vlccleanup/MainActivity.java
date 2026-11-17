@@ -93,6 +93,7 @@ public class MainActivity extends Activity {
     private static final int REQ_VLC = 2;
     private static final int REQ_DELETE = 3;       // Android 11+ system delete dialog
     private static final int REQ_DELETE_RETRY = 4; // Android 10 "allow access" dialog
+    private static final int REQ_PICK = 5;         // picking an album's videos in Google Photos
 
     // Result codes VLC returns (see VLC for Android's player intent docs)
     private static final int VLC_CONNECTION_FAILED = 2;
@@ -920,18 +921,53 @@ public class MainActivity extends Activity {
     }
 
     private void showAlbumHelp() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this)
+        new AlertDialog.Builder(this)
                 .setTitle("Add a Google Photos album")
-                .setMessage("Google Photos doesn't let other apps read your albums, but you can share an album's videos here:\n\n"
-                        + "1. In Google Photos, open the album.\n"
-                        + "2. Tap ⋮ → Select (or long-press the first video), then select all of them.\n"
-                        + "3. Tap Share and pick VLC Cleanup.\n"
-                        + "4. Name the group and tap Save.\n\n"
-                        + "Only videos stored on this phone can be matched.")
-                .setNegativeButton("Close", null);
-        Intent photos = getPackageManager().getLaunchIntentForPackage("com.google.android.apps.photos");
-        if (photos != null) b.setPositiveButton("Open Google Photos", (d, w) -> startActivity(photos));
-        b.show();
+                .setMessage("Google Photos doesn't let other apps read your albums, but you can pick the album's videos:\n\n"
+                        + "1. Tap Pick from Google Photos.\n"
+                        + "2. Go to the Albums tab and open your album.\n"
+                        + "3. Select its videos (tap the first one, then the rest).\n"
+                        + "4. Tap Done, then name the group.\n\n"
+                        + "If it won't let you pick them all at once, pick the rest afterwards and choose "
+                        + "\"Add to existing group\". Only videos stored on this phone can be matched.")
+                .setPositiveButton("Pick from Google Photos", (d, w) -> pickFromPhotos())
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private void pickFromPhotos() {
+        Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+        pick.setType("video/*");
+        pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        pick.setPackage("com.google.android.apps.photos");
+        try {
+            startActivityForResult(pick, REQ_PICK);
+        } catch (ActivityNotFoundException e) {
+            // No Google Photos (or it can't pick): use whatever picker the phone has.
+            pick.setPackage(null);
+            try {
+                startActivityForResult(Intent.createChooser(pick, "Pick videos"), REQ_PICK);
+            } catch (ActivityNotFoundException e2) {
+                Toast.makeText(this, "No app on this phone can pick videos.", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void onPicked(Intent data) {
+        List<Uri> uris = new ArrayList<>();
+        if (data != null) {
+            if (data.getClipData() != null) {
+                for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                    Uri u = data.getClipData().getItemAt(i).getUri();
+                    if (u != null) uris.add(u);
+                }
+            } else if (data.getData() != null) {
+                uris.add(data.getData());
+            }
+        }
+        if (uris.isEmpty()) return;
+        pendingShare = uris;
+        if (!allVideos.isEmpty()) matchShared();
     }
 
     @SuppressWarnings("deprecation")
@@ -1046,7 +1082,7 @@ public class MainActivity extends Activity {
         if (matched.size() < total) msg += " The rest are photos, are only in the cloud, or couldn't be matched.";
         msg += "\n\nName this group:";
 
-        new AlertDialog.Builder(this)
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
                 .setTitle("Make a group")
                 .setMessage(msg)
                 .setView(pad)
@@ -1067,8 +1103,28 @@ public class MainActivity extends Activity {
                     list.setSelection(0);
                     Toast.makeText(this, "Saved \"" + a.name + "\" with " + matched.size() + " videos", Toast.LENGTH_LONG).show();
                 })
-                .setNegativeButton("Cancel", null)
-                .show();
+                .setNegativeButton("Cancel", null);
+        loadAlbums();
+        if (!albums.isEmpty()) {
+            b.setNeutralButton("Add to existing group", (d, w) -> {
+                String[] names = new String[albums.size()];
+                for (int i = 0; i < names.length; i++) names[i] = albums.get(i).name;
+                new AlertDialog.Builder(this)
+                        .setTitle("Add " + matched.size() + " videos to…")
+                        .setItems(names, (d2, which) -> {
+                            Album a = albums.get(which);
+                            int before = a.ids.size();
+                            for (Long id : matched) if (!a.ids.contains(id)) a.ids.add(id);
+                            saveAlbums();
+                            openGroup = null;
+                            applyFilter();
+                            Toast.makeText(this, "Added " + (a.ids.size() - before) + " videos to \"" + a.name + "\" ("
+                                    + a.ids.size() + " total)", Toast.LENGTH_LONG).show();
+                        })
+                        .show();
+            });
+        }
+        b.show();
     }
 
     private void manageAlbum(Group g) {
@@ -1166,6 +1222,9 @@ public class MainActivity extends Activity {
             // Android 11+: the system dialog did the delete if the user tapped Allow.
             if (resultCode == RESULT_OK) onDeleted(current);
             else Toast.makeText(this, "Kept it", Toast.LENGTH_SHORT).show();
+
+        } else if (requestCode == REQ_PICK) {
+            if (resultCode == RESULT_OK) onPicked(data);
 
         } else if (requestCode == REQ_DELETE_RETRY) {
             // Android 10: user granted access, so try deleting again.

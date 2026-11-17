@@ -23,9 +23,11 @@ can't be copied, because VLC keeps them private.
 
 ### Making a group from a Google Photos album
 
-Google Photos doesn't let other apps read albums, so share the videos instead: open the
-album in Google Photos, select all its videos, tap **Share → VLC Cleanup**, name the group and
-tap **Save**. VLC Cleanup matches them to the videos on your phone. Long-press the group to
+Google Photos doesn't let other apps read albums, so pick the videos instead: in VLC Cleanup
+tap **⋮ → Add a Google Photos album… → Pick from Google Photos**, open the album under
+**Albums**, select its videos, tap **Done**, name the group and tap **Save**. (Sharing the videos
+from Google Photos to VLC Cleanup also works where the share menu offers it.) To add more videos
+later, pick them the same way and choose **Add to existing group**. VLC Cleanup matches them to the videos on your phone. Long-press the group to
 rename or remove it (removing a group never deletes videos). This is also in the ⋮ menu.
 
 Use the sort button (top right) to sort by size, newest, oldest or name.
